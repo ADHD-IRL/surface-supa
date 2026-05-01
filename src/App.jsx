@@ -11,6 +11,7 @@ import Dashboard from '@/pages/Dashboard';
 import NewSession from '@/pages/NewSession';
 import SessionDetail from '@/pages/SessionDetail';
 import AgentManager from '@/pages/AgentManager';
+import Splash from '@/pages/Splash';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -36,6 +37,7 @@ const AuthenticatedApp = () => {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/splash" element={<Splash />} />
         <Route path="/sessions/new" element={<NewSession />} />
         <Route path="/sessions/:id" element={<SessionDetail />} />
         <Route path="/agents" element={<AgentManager />} />
