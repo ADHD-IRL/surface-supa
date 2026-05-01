@@ -597,15 +597,75 @@ export default function SessionDetail() {
         {session.status === 'completed' && (
           <>
             <TabsContent value="report" className="space-y-6 mt-4">
+              {/* Session metadata */}
+              <Card className="overflow-hidden">
+                <div className="px-6 py-3 border-b border-border bg-muted/30">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Session Details</h3>
+                </div>
+                <table className="w-full border-collapse">
+                  <tbody>
+                    {[
+                      ['Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
+                      ['Mode', (session.mode || 'standard').charAt(0).toUpperCase() + (session.mode || 'standard').slice(1)],
+                      ['Debate Rounds', String(session.rounds?.length || 0)],
+                      ['Risks Identified', String(session.risk_registry?.length || 0)],
+                      ['Attack Chains', String(session.attack_chains?.length || 0)],
+                      ['Scenario', session.scenario],
+                    ].map(([label, value], i) => (
+                      <tr key={label} className={cn("border-b border-border last:border-b-0", i % 2 === 0 ? "bg-background" : "bg-muted/10")}>
+                        <td className="px-6 py-3 w-40 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
+                        <td className="px-6 py-3 text-sm text-foreground">{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+
+              {/* Executive summary */}
               {session.executive_summary && (
-                <Card className="p-6">
+                <Card className="p-6 border-l-4 border-l-primary">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Executive Summary</h3>
                   <div className="prose prose-sm max-w-none text-foreground">
                     <ReactMarkdown>{session.executive_summary}</ReactMarkdown>
                   </div>
                 </Card>
               )}
+
+              {/* Risk heatmap */}
               <RiskHeatmap risks={session.risk_registry} />
+
+              {/* Risk registry table */}
+              {session.risk_registry?.length > 0 && (
+                <MitigationTable risks={session.risk_registry} />
+              )}
+
+              {/* Debate transcript table */}
+              {session.rounds?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Debate Transcript</h3>
+                  <div className="space-y-4">
+                    {session.rounds.map((round, i) => (
+                      <DebateRound key={i} round={round} index={i} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Attack chains */}
+              {session.attack_chains?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Attack / Effect Chains</h3>
+                  <ChainDiagram chains={session.attack_chains} />
+                </div>
+              )}
+
+              {/* Mitigation playbook */}
+              {session.mitigation_playbook && (
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Mitigation Playbook</h3>
+                  <MitigationPlaybook playbook={session.mitigation_playbook} />
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="risks" className="mt-4">
