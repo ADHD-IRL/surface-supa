@@ -6,18 +6,20 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Play, FileDown, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Play, FileDown, Loader2, BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import DebateRound from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
 import ChainDiagram from '@/components/session/ChainDiagram';
 import MitigationTable from '@/components/session/MitigationTable';
+import MitigationPlaybook from '@/components/session/MitigationPlaybook';
 import ReactMarkdown from 'react-markdown';
 
 export default function SessionDetail() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const [runningStep, setRunningStep] = useState('');
+  const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['session', id],
@@ -164,6 +166,41 @@ export default function SessionDetail() {
     },
   });
 
+  const handleGeneratePlaybook = async () => {
+    setGeneratingPlaybook(true);
+    const allTranscripts = session.rounds.map(rd =>
+      `Round ${rd.round_number}:\nRed (${rd.red_agent_name}): ${rd.red_response}\nBlue (${rd.blue_agent_name}): ${rd.blue_response}`
+    ).join('\n\n---\n\n');
+
+    const playbook = await base44.integrations.Core.InvokeLLM({
+      prompt: `You are a senior risk and security strategist. Based on the following Red/Blue adversarial debate about: "${session.scenario}"\n\nDebate transcripts:\n${allTranscripts}\n\nGenerate a concise, actionable mitigation playbook that a team can execute immediately.`,
+      response_json_schema: {
+        type: 'object',
+        properties: {
+          overview: { type: 'string', description: '2-3 sentence summary of the overall mitigation strategy' },
+          actions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                priority: { type: 'string', description: 'One of: immediate, short-term, long-term' },
+                title: { type: 'string' },
+                description: { type: 'string' },
+                owner: { type: 'string', description: 'Role or team responsible' },
+                timeline: { type: 'string', description: 'e.g. Within 24h, Within 30 days' },
+                steps: { type: 'array', items: { type: 'string' }, description: 'Concrete step-by-step actions' }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    await base44.entities.Session.update(id, { mitigation_playbook: playbook });
+    queryClient.invalidateQueries({ queryKey: ['session', id] });
+    setGeneratingPlaybook(false);
+  };
+
   const handleExportPDF = async () => {
     const { default: jsPDF } = await import('jspdf');
     const doc = new jsPDF();
@@ -256,6 +293,19 @@ export default function SessionDetail() {
               <Play className="w-4 h-4" /> Run Analysis
             </Button>
           )}
+          {session.status === 'completed' && !session.mitigation_playbook && (
+            <Button
+              variant="outline"
+              onClick={handleGeneratePlaybook}
+              disabled={generatingPlaybook}
+              className="gap-2 border-green-team/40 text-green-team hover:bg-green-team/5"
+            >
+              {generatingPlaybook
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <BookOpen className="w-4 h-4" />}
+              {generatingPlaybook ? 'Generating...' : 'Generate Playbook'}
+            </Button>
+          )}
           {session.status === 'completed' && (
             <Button variant="outline" onClick={handleExportPDF} className="gap-2">
               <FileDown className="w-4 h-4" /> Export PDF
@@ -283,6 +333,9 @@ export default function SessionDetail() {
               <TabsTrigger value="report">Report</TabsTrigger>
               <TabsTrigger value="risks">Risks</TabsTrigger>
               <TabsTrigger value="chains">Chains</TabsTrigger>
+              {session.mitigation_playbook && (
+                <TabsTrigger value="playbook">Playbook</TabsTrigger>
+              )}
             </>
           )}
         </TabsList>
@@ -324,6 +377,12 @@ export default function SessionDetail() {
             <TabsContent value="chains" className="mt-4">
               <ChainDiagram chains={session.attack_chains} />
             </TabsContent>
+
+            {session.mitigation_playbook && (
+              <TabsContent value="playbook" className="mt-4">
+                <MitigationPlaybook playbook={session.mitigation_playbook} />
+              </TabsContent>
+            )}
           </>
         )}
       </Tabs>

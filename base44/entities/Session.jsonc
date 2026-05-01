@@ -3,26 +3,22 @@
   "type": "object",
   "properties": {
     "title": {
-      "type": "string",
-      "description": "Session title"
+      "type": "string"
     },
     "scenario": {
-      "type": "string",
-      "description": "Scenario description text"
+      "type": "string"
     },
     "reference_urls": {
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "description": "Reference URLs for context"
+      }
     },
     "file_urls": {
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "description": "Uploaded file URLs"
+      }
     },
     "mode": {
       "type": "string",
@@ -31,8 +27,7 @@
         "deep",
         "rapid"
       ],
-      "default": "standard",
-      "description": "Debate mode"
+      "default": "standard"
     },
     "status": {
       "type": "string",
@@ -48,19 +43,54 @@
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "description": "Array of agent IDs selected for this session"
+      }
     },
     "domain_focus": {
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "description": "Domain focus areas"
+      }
     },
     "executive_summary": {
-      "type": "string",
-      "description": "AI-generated executive summary"
+      "type": "string"
+    },
+    "mitigation_playbook": {
+      "type": "object",
+      "description": "AI-generated mitigation playbook",
+      "properties": {
+        "overview": {
+          "type": "string"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "priority": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "timeline": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "risk_registry": {
       "type": "array",
@@ -95,8 +125,7 @@
             "type": "string"
           }
         }
-      },
-      "description": "Generated risk registry"
+      }
     },
     "attack_chains": {
       "type": "array",
@@ -127,8 +156,7 @@
             }
           }
         }
-      },
-      "description": "Attack/effect chain data"
+      }
     },
     "rounds": {
       "type": "array",
@@ -163,8 +191,7 @@
             "type": "string"
           }
         }
-      },
-      "description": "Debate rounds"
+      }
     }
   },
   "required": [
