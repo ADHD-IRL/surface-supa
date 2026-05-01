@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import heroImage from '@/assets/surface-hero.jpg';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,20 +38,33 @@ export default function Layout() {
         mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
       )}>
         {/* Logo */}
-        <div className={cn("h-16 flex items-center border-b border-sidebar-border px-4", collapsed && "justify-center")}>
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-sidebar-primary/20 flex items-center justify-center flex-shrink-0">
-              <Shield className="w-4 h-4 text-sidebar-primary" />
-            </div>
-            {!collapsed && <span className="text-lg font-bold text-white tracking-tight">Surface</span>}
+        <div className={cn("h-16 flex items-center border-b border-sidebar-border overflow-hidden", collapsed ? "justify-center px-2" : "px-0")}>
+          <Link to="/splash" className="flex items-center gap-0 w-full h-full">
+            {collapsed ? (
+              <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
+                <img src={heroImage} alt="Surface" className="w-full h-full object-cover object-top" />
+              </div>
+            ) : (
+              <div className="relative w-full h-full">
+                <img
+                  src={heroImage}
+                  alt="Surface"
+                  className="w-full h-full object-cover object-top opacity-60"
+                />
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent to-sidebar" />
+                <div className="absolute inset-0 flex items-center px-4">
+                  <span className="text-lg font-bold text-white tracking-tight drop-shadow">Surface</span>
+                </div>
+              </div>
+            )}
           </Link>
         </div>
 
         {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-1">
           {navItems.map((item) => {
-            const isActive = item.path === '/' 
-              ? location.pathname === '/' 
+            const isActive = item.path === '/'
+              ? location.pathname === '/'
               : location.pathname.startsWith(item.path);
             return (
               <Link
@@ -102,10 +116,12 @@ export default function Layout() {
           <Button variant="ghost" size="icon" onClick={() => setMobileOpen(true)}>
             <Menu className="w-5 h-5" />
           </Button>
-          <div className="flex items-center gap-2 ml-3">
-            <Shield className="w-4 h-4 text-primary" />
+          <Link to="/splash" className="flex items-center gap-2 ml-3">
+            <div className="w-7 h-7 rounded overflow-hidden flex-shrink-0">
+              <img src={heroImage} alt="Surface" className="w-full h-full object-cover object-top" />
+            </div>
             <span className="font-bold">Surface</span>
-          </div>
+          </Link>
         </div>
 
         <main className="flex-1">
