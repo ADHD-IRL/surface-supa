@@ -6,7 +6,11 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import DebateRound from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
@@ -21,6 +25,14 @@ export default function SessionDetail() {
   const queryClient = useQueryClient();
   const [runningStep, setRunningStep] = useState('');
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => base44.entities.Session.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      navigate('/');
+    },
+  });
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['session', id],
@@ -793,6 +805,39 @@ export default function SessionDetail() {
               <FileDown className="w-4 h-4" /> Export PDF
             </Button>
           )}
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                className="gap-2 border-red-team/30 text-red-team hover:bg-red-team/5 hover:border-red-team/50"
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Trash2 className="w-4 h-4" />}
+                Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete session?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete <span className="font-medium text-foreground">"{session.title}"</span> and
+                  all its artifacts — debate rounds, risk registry, attack chains, and any generated playbook.
+                  This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => deleteMutation.mutate()}
+                  className="bg-red-team text-white hover:bg-red-team/90"
+                >
+                  Delete session
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 

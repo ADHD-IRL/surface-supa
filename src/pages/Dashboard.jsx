@@ -1,11 +1,13 @@
 import React from 'react';
 import { base44 } from '@/api/base44Client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import StatsCards from '@/components/dashboard/StatsCards';
 import AgentStatusGrid from '@/components/dashboard/AgentStatusGrid';
 import SessionsList from '@/components/dashboard/SessionsList';
 
 export default function Dashboard() {
+  const queryClient = useQueryClient();
+
   const { data: sessions = [], isLoading: loadingSessions } = useQuery({
     queryKey: ['sessions'],
     queryFn: () => base44.entities.Session.list('-created_date', 50),
@@ -14,6 +16,11 @@ export default function Dashboard() {
   const { data: agents = [], isLoading: loadingAgents } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.list(),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (sessionId) => base44.entities.Session.delete(sessionId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }),
   });
 
   const isLoading = loadingSessions || loadingAgents;
@@ -35,7 +42,7 @@ export default function Dashboard() {
 
       <StatsCards sessions={sessions} />
       <AgentStatusGrid agents={agents} />
-      <SessionsList sessions={sessions} />
+      <SessionsList sessions={sessions} onDelete={(id) => deleteMutation.mutate(id)} deletingId={deleteMutation.variables} />
     </div>
   );
 }
