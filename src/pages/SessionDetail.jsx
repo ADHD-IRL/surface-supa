@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Play, FileDown, Loader2, BookOpen } from 'lucide-react';
+import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import DebateRound from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
@@ -17,6 +17,7 @@ import ReactMarkdown from 'react-markdown';
 
 export default function SessionDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [runningStep, setRunningStep] = useState('');
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
@@ -745,12 +746,33 @@ export default function SessionDetail() {
               {config.label}
             </Badge>
           </div>
+          {session.parent_session_id && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <GitBranch className="w-3 h-3 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Re-run of </span>
+              <Link
+                to={`/sessions/${session.parent_session_id}`}
+                className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                {session.parent_session_title || 'original session'}
+              </Link>
+            </div>
+          )}
           <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{session.scenario}</p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
           {session.status === 'draft' && (
             <Button onClick={() => runDebateMutation.mutate()} disabled={runDebateMutation.isPending} className="gap-2">
               <Play className="w-4 h-4" /> Run Analysis
+            </Button>
+          )}
+          {(session.status === 'completed' || session.status === 'failed') && (
+            <Button
+              variant="outline"
+              onClick={() => navigate('/sessions/new', { state: { template: session } })}
+              className="gap-2"
+            >
+              <GitBranch className="w-4 h-4" /> Edit & Re-run
             </Button>
           )}
           {session.status === 'completed' && !session.mitigation_playbook && (
