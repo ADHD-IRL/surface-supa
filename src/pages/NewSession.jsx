@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
@@ -9,22 +9,24 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, X, Upload, ArrowRight, Link2 } from 'lucide-react';
+import { Plus, X, Upload, ArrowRight, Link2, GitBranch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
 
 export default function NewSession() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const template = location.state?.template || null;
+
   const [form, setForm] = useState({
-    title: '',
-    scenario: '',
-    reference_urls: [],
-    file_urls: [],
-    mode: 'standard',
-    selected_agents: [],
-    domain_focus: [],
+    title:          template ? `${template.title} (Re-run)` : '',
+    scenario:       template?.scenario       || '',
+    reference_urls: template?.reference_urls || [],
+    file_urls:      template?.file_urls      || [],
+    mode:           template?.mode           || 'standard',
+    selected_agents:template?.selected_agents|| [],
+    domain_focus:   template?.domain_focus   || [],
   });
   const [urlInput, setUrlInput] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -82,15 +84,54 @@ export default function NewSession() {
     const selectedAgents = form.selected_agents.length > 0
       ? form.selected_agents
       : agents.map(a => a.id);
-    createMutation.mutate({ ...form, selected_agents: selectedAgents, status: 'draft' });
+    createMutation.mutate({
+      ...form,
+      selected_agents: selectedAgents,
+      status: 'draft',
+      ...(template ? {
+        parent_session_id:    template.id,
+        parent_session_title: template.title,
+      } : {}),
+    });
   };
 
   return (
     <div className="p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">New Session</h1>
-        <p className="text-sm text-muted-foreground mt-1">Set up a Red/Blue team adversarial analysis</p>
+        {template ? (
+          <>
+            <h1 className="text-2xl font-bold tracking-tight">Edit &amp; Re-run</h1>
+            <div className="flex items-center gap-1.5 mt-1">
+              <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Based on{' '}
+                <Link
+                  to={`/sessions/${template.id}`}
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  {template.title}
+                </Link>
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <h1 className="text-2xl font-bold tracking-tight">New Session</h1>
+            <p className="text-sm text-muted-foreground mt-1">Set up a Red/Blue team adversarial analysis</p>
+          </>
+        )}
       </div>
+
+      {template && (
+        <Card className="px-4 py-3 bg-muted/40 border-dashed flex items-start gap-3">
+          <GitBranch className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-muted-foreground leading-relaxed">
+            Edit the fields below to adjust your scenario, mode, or agents. Saving will create a
+            <span className="font-medium text-foreground"> new independent session</span> — the
+            original will not be modified.
+          </div>
+        </Card>
+      )}
 
       <Card className="p-6 space-y-6">
         {/* Title */}
@@ -220,7 +261,12 @@ export default function NewSession() {
         </div>
       </Card>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        {template ? (
+          <Button variant="ghost" onClick={() => navigate(`/sessions/${template.id}`)} className="gap-2 text-muted-foreground">
+            <ArrowRight className="w-4 h-4 rotate-180" /> Back to original
+          </Button>
+        ) : <div />}
         <Button
           onClick={handleSubmit}
           disabled={!form.title || !form.scenario || createMutation.isPending}
@@ -228,8 +274,10 @@ export default function NewSession() {
         >
           {createMutation.isPending ? (
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : template ? (
+            <><GitBranch className="w-4 h-4" /> Save as New Version</>
           ) : (
-            <>Create & Start Session <ArrowRight className="w-4 h-4" /></>
+            <>Create &amp; Start Session <ArrowRight className="w-4 h-4" /></>
           )}
         </Button>
       </div>
