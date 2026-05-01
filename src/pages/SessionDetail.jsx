@@ -203,45 +203,283 @@ export default function SessionDetail() {
 
   const handleExportPDF = async () => {
     const { default: jsPDF } = await import('jspdf');
-    const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.text('Surface — Risk Analysis Report', 20, 20);
-    doc.setFontSize(12);
-    doc.text(session.title, 20, 35);
-    doc.setFontSize(10);
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const PAGE_W = 210;
+    const PAGE_H = 297;
+    const ML = 18; // margin left
+    const MR = 18; // margin right
+    const CONTENT_W = PAGE_W - ML - MR;
+    const MARGIN_TOP = 18;
+    const MARGIN_BOTTOM = 20;
+    let y = MARGIN_TOP;
 
-    let y = 50;
-    if (session.executive_summary) {
-      doc.text('Executive Summary:', 20, y);
-      y += 8;
-      const lines = doc.splitTextToSize(session.executive_summary, 170);
+    const checkPage = (needed = 10) => {
+      if (y + needed > PAGE_H - MARGIN_BOTTOM) { doc.addPage(); y = MARGIN_TOP; return true; }
+      return false;
+    };
+
+    const writeLine = (text, x, size, color = [30, 30, 30], style = 'normal') => {
+      doc.setFontSize(size);
+      doc.setTextColor(...color);
+      doc.setFont('helvetica', style);
+      doc.text(text, x, y);
+    };
+
+    const writeWrapped = (text, x, size, maxW, color = [60, 60, 60], lineH = 5.5) => {
+      doc.setFontSize(size);
+      doc.setTextColor(...color);
+      doc.setFont('helvetica', 'normal');
+      const clean = (text || '').replace(/[#*_`>]/g, '').replace(/\n+/g, ' ').trim();
+      const lines = doc.splitTextToSize(clean, maxW);
       lines.forEach(line => {
-        if (y > 270) { doc.addPage(); y = 20; }
-        doc.text(line, 20, y);
-        y += 5;
+        checkPage(lineH + 1);
+        doc.text(line, x, y);
+        y += lineH;
       });
+    };
+
+    const sectionHeader = (title) => {
+      checkPage(14);
+      y += 4;
+      doc.setFillColor(22, 78, 162);
+      doc.roundedRect(ML, y - 5, CONTENT_W, 9, 2, 2, 'F');
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title.toUpperCase(), ML + 4, y + 0.5);
+      y += 9;
+    };
+
+    const subHeader = (title) => {
+      checkPage(10);
+      y += 3;
+      doc.setFontSize(9);
+      doc.setTextColor(22, 78, 162);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title, ML, y);
+      y += 1;
+      doc.setDrawColor(22, 78, 162);
+      doc.setLineWidth(0.3);
+      doc.line(ML, y, ML + CONTENT_W, y);
+      y += 4;
+    };
+
+    const addFooter = () => {
+      const total = doc.getNumberOfPages();
+      for (let p = 1; p <= total; p++) {
+        doc.setPage(p);
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Surface — Confidential Risk Analysis', ML, PAGE_H - 8);
+        doc.text(`Page ${p} of ${total}`, PAGE_W - MR - 20, PAGE_H - 8);
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.2);
+        doc.line(ML, PAGE_H - 12, PAGE_W - MR, PAGE_H - 12);
+      }
+    };
+
+    // ── COVER PAGE ──────────────────────────────────────────────
+    doc.setFillColor(15, 35, 70);
+    doc.rect(0, 0, PAGE_W, 80, 'F');
+    doc.setFillColor(22, 78, 162);
+    doc.rect(0, 70, PAGE_W, 6, 'F');
+
+    doc.setFontSize(9);
+    doc.setTextColor(150, 190, 255);
+    doc.setFont('helvetica', 'normal');
+    doc.text('SURFACE  ·  ADVERSARIAL RISK INTELLIGENCE', ML, 28);
+
+    doc.setFontSize(22);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    const titleLines = doc.splitTextToSize(session.title, CONTENT_W);
+    titleLines.forEach(line => { doc.text(line, ML, y + 14); y += 9; });
+
+    doc.setFontSize(10);
+    doc.setTextColor(180, 210, 255);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Red / Blue Team Adversarial Analysis Report', ML, 66);
+
+    y = 88;
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    doc.setFont('helvetica', 'normal');
+    const metaItems = [
+      ['Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
+      ['Mode', (session.mode || 'standard').charAt(0).toUpperCase() + (session.mode || 'standard').slice(1)],
+      ['Rounds', String(session.rounds?.length || 0)],
+      ['Risks Identified', String(session.risk_registry?.length || 0)],
+      ['Domain Focus', (session.domain_focus || []).join(', ') || '—'],
+    ];
+    metaItems.forEach(([label, val]) => {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(50, 50, 50);
+      doc.text(`${label}:`, ML, y);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
+      doc.text(val, ML + 38, y);
+      y += 7;
+    });
+
+    y += 6;
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    const scenLines = doc.splitTextToSize(`Scenario: ${session.scenario}`, CONTENT_W);
+    scenLines.forEach(line => { doc.text(line, ML, y); y += 5; });
+
+    // ── EXECUTIVE SUMMARY ───────────────────────────────────────
+    if (session.executive_summary) {
+      doc.addPage(); y = MARGIN_TOP;
+      sectionHeader('Executive Summary');
+      y += 2;
+      writeWrapped(session.executive_summary, ML, 9.5, CONTENT_W, [40, 40, 40], 6);
     }
 
-    y += 10;
-    if (session.risk_registry?.length) {
-      if (y > 250) { doc.addPage(); y = 20; }
-      doc.text('Risk Registry:', 20, y);
-      y += 8;
-      session.risk_registry.forEach((risk, i) => {
-        if (y > 260) { doc.addPage(); y = 20; }
-        doc.text(`${i + 1}. ${risk.title} (L:${risk.likelihood} I:${risk.impact})`, 20, y);
+    // ── DEBATE TRANSCRIPT ───────────────────────────────────────
+    if (session.rounds?.length) {
+      doc.addPage(); y = MARGIN_TOP;
+      sectionHeader('Debate Transcript');
+      session.rounds.forEach((rd) => {
+        subHeader(`Round ${rd.round_number}`);
+        // Red
+        checkPage(8);
+        doc.setFillColor(220, 38, 38);
+        doc.roundedRect(ML, y - 3.5, 2.5, 5, 0.5, 0.5, 'F');
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(180, 20, 20);
+        doc.text(`${rd.red_agent_name}  (Red Team)`, ML + 5, y);
         y += 5;
-        const mitLines = doc.splitTextToSize(`Mitigation: ${risk.mitigation}`, 160);
-        mitLines.forEach(line => {
-          if (y > 270) { doc.addPage(); y = 20; }
-          doc.text(line, 25, y);
-          y += 5;
-        });
+        writeWrapped(rd.red_response, ML + 5, 8.5, CONTENT_W - 5, [60, 60, 60], 5.2);
         y += 3;
+        // Blue
+        checkPage(8);
+        doc.setFillColor(37, 99, 235);
+        doc.roundedRect(ML, y - 3.5, 2.5, 5, 0.5, 0.5, 'F');
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 64, 175);
+        doc.text(`${rd.blue_agent_name}  (Blue Team)`, ML + 5, y);
+        y += 5;
+        writeWrapped(rd.blue_response, ML + 5, 8.5, CONTENT_W - 5, [60, 60, 60], 5.2);
+        y += 5;
       });
     }
 
-    doc.save(`surface-report-${session.title.replace(/\s+/g, '-')}.pdf`);
+    // ── RISK REGISTRY ───────────────────────────────────────────
+    if (session.risk_registry?.length) {
+      doc.addPage(); y = MARGIN_TOP;
+      sectionHeader('Risk Registry');
+      const scoreColor = (l, imp) => {
+        const s = l * imp;
+        if (s >= 16) return [220, 38, 38];
+        if (s >= 10) return [234, 88, 12];
+        if (s >= 5)  return [202, 138, 4];
+        return [22, 163, 74];
+      };
+      session.risk_registry.forEach((risk, i) => {
+        checkPage(22);
+        const col = scoreColor(risk.likelihood, risk.impact);
+        doc.setFillColor(...col);
+        doc.roundedRect(ML, y - 4, 2, 18, 0.5, 0.5, 'F');
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 30, 30);
+        doc.text(`${i + 1}. ${risk.title}`, ML + 5, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...col);
+        doc.text(`L:${risk.likelihood}  I:${risk.impact}  Category: ${risk.category || '—'}  Owner: ${risk.owner || '—'}`, ML + 5, y + 5);
+        y += 9;
+        writeWrapped(risk.description, ML + 5, 8, CONTENT_W - 5, [70, 70, 70], 5);
+        if (risk.mitigation) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.setTextColor(22, 78, 162);
+          checkPage(6);
+          doc.text('Mitigation:', ML + 5, y);
+          y += 4.5;
+          writeWrapped(risk.mitigation, ML + 5, 8, CONTENT_W - 5, [60, 90, 160], 5);
+        }
+        y += 4;
+      });
+    }
+
+    // ── ATTACK CHAINS ───────────────────────────────────────────
+    if (session.attack_chains?.length) {
+      doc.addPage(); y = MARGIN_TOP;
+      sectionHeader('Attack / Effect Chains');
+      session.attack_chains.forEach((chain) => {
+        subHeader(chain.name);
+        chain.steps?.forEach((step, si) => {
+          checkPage(10);
+          const stepColors = { initial: [245, 158, 11], exploit: [220, 38, 38], lateral: [234, 88, 12], impact: [185, 28, 28], defense: [37, 99, 235] };
+          const sc = stepColors[step.type] || [100, 100, 100];
+          doc.setFillColor(...sc);
+          doc.circle(ML + 3, y - 1.5, 3, 'F');
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(255, 255, 255);
+          doc.text(String(si + 1), ML + 1.8, y - 0.5);
+          doc.setFontSize(8.5);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(30, 30, 30);
+          doc.text(step.label, ML + 9, y);
+          y += 5;
+          if (step.description) {
+            writeWrapped(step.description, ML + 9, 8, CONTENT_W - 9, [90, 90, 90], 5);
+          }
+          if (si < chain.steps.length - 1) {
+            doc.setDrawColor(180, 180, 180);
+            doc.setLineWidth(0.3);
+            doc.line(ML + 3, y, ML + 3, y + 2);
+            y += 3;
+          }
+          y += 2;
+        });
+        y += 4;
+      });
+    }
+
+    // ── MITIGATION PLAYBOOK ─────────────────────────────────────
+    if (session.mitigation_playbook) {
+      doc.addPage(); y = MARGIN_TOP;
+      sectionHeader('Mitigation Playbook');
+      if (session.mitigation_playbook.overview) {
+        y += 2;
+        writeWrapped(session.mitigation_playbook.overview, ML, 9.5, CONTENT_W, [40, 40, 40], 6);
+        y += 4;
+      }
+      const priorityColors = { immediate: [220, 38, 38], 'short-term': [234, 88, 12], 'long-term': [37, 99, 235] };
+      session.mitigation_playbook.actions?.forEach((action, i) => {
+        checkPage(24);
+        const pc = priorityColors[action.priority?.toLowerCase()] || [100, 100, 100];
+        doc.setFillColor(...pc);
+        doc.roundedRect(ML, y - 4, 2, 5, 0.5, 0.5, 'F');
+        doc.setFontSize(9.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 30, 30);
+        doc.text(`${i + 1}. ${action.title}`, ML + 5, y);
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...pc);
+        const meta = [action.priority, action.timeline, action.owner ? `Owner: ${action.owner}` : ''].filter(Boolean).join('  ·  ');
+        doc.text(meta, ML + 5, y + 5);
+        y += 10;
+        writeWrapped(action.description, ML + 5, 8.5, CONTENT_W - 5, [60, 60, 60], 5.2);
+        if (action.steps?.length) {
+          action.steps.forEach((step, si) => {
+            checkPage(7);
+            doc.setFillColor(22, 78, 162);
+            doc.circle(ML + 7, y - 1.5, 1.2, 'F');
+            writeWrapped(`${si + 1}. ${step}`, ML + 10, 8, CONTENT_W - 10, [60, 60, 60], 5);
+          });
+        }
+        y += 5;
+      });
+    }
+
+    addFooter();
+    doc.save(`surface-report-${session.title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
   };
 
   if (isLoading) {
