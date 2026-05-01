@@ -1,0 +1,174 @@
+{
+  "name": "Session",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Session title"
+    },
+    "scenario": {
+      "type": "string",
+      "description": "Scenario description text"
+    },
+    "reference_urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Reference URLs for context"
+    },
+    "file_urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Uploaded file URLs"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "deep",
+        "rapid"
+      ],
+      "default": "standard",
+      "description": "Debate mode"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "running",
+        "completed",
+        "failed"
+      ],
+      "default": "draft"
+    },
+    "selected_agents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Array of agent IDs selected for this session"
+    },
+    "domain_focus": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Domain focus areas"
+    },
+    "executive_summary": {
+      "type": "string",
+      "description": "AI-generated executive summary"
+    },
+    "risk_registry": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "likelihood": {
+            "type": "number"
+          },
+          "impact": {
+            "type": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "mitigation": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Generated risk registry"
+    },
+    "attack_chains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "Attack/effect chain data"
+    },
+    "rounds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "round_number": {
+            "type": "number"
+          },
+          "red_agent_id": {
+            "type": "string"
+          },
+          "red_agent_name": {
+            "type": "string"
+          },
+          "red_response": {
+            "type": "string"
+          },
+          "blue_agent_id": {
+            "type": "string"
+          },
+          "blue_agent_name": {
+            "type": "string"
+          },
+          "blue_response": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Debate rounds"
+    }
+  },
+  "required": [
+    "title",
+    "scenario"
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "name": "Agent",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Agent display name"
+    },
+    "team": {
+      "type": "string",
+      "enum": [
+        "red",
+        "blue"
+      ],
+      "description": "Red team (attacker) or Blue team (defender)"
+    },
+    "domain_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Domain expertise tags like cyber, geopolitical, financial, operational, strategic"
+    },
+    "tone": {
+      "type": "string",
+      "enum": [
+        "aggressive",
+        "analytical",
+        "cautious",
+        "provocative",
+        "measured"
+      ],
+      "default": "analytical",
+      "description": "Communication tone of the agent"
+    },
+    "system_prompt": {
+      "type": "string",
+      "description": "Custom system prompt for the agent"
+    },
+    "is_default": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this is a built-in default agent"
+    },
+    "avatar_color": {
+      "type": "string",
+      "description": "Hex color for avatar"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    }
+  },
+  "required": [
+    "name",
+    "team"
+  ]
+}
