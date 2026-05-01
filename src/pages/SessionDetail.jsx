@@ -478,39 +478,139 @@ export default function SessionDetail() {
     if (session.rounds?.length) {
       doc.addPage(); y = MARGIN_TOP;
       sectionHeader('Debate Transcript');
-      const TW = 30; // team column width
+
+      // Preserve markdown structure: paragraphs, bullets, numbered lists, headings
+      const processMdLines = (text, maxW, size) => {
+        if (!text) return ['—'];
+        doc.setFontSize(size);
+        const result = [];
+        const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim());
+        paragraphs.forEach((para, pi) => {
+          if (pi > 0) result.push('');
+          para.split('\n').forEach(line => {
+            const t = line.trim();
+            if (!t) return;
+            if (/^[-*•+]\s/.test(t)) {
+              const txt = '• ' + t.replace(/^[-*•+]\s+/, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/[*_`#>]/g, '').trim();
+              doc.splitTextToSize(txt, maxW).forEach(l => result.push(l));
+            } else if (/^\d+\.\s/.test(t)) {
+              const txt = t.replace(/\*\*(.+?)\*\*/g, '$1').replace(/[*_`#>]/g, '').trim();
+              doc.splitTextToSize(txt, maxW).forEach(l => result.push(l));
+            } else if (/^#+\s/.test(t)) {
+              const txt = t.replace(/^#+\s+/, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/[*_`#>]/g, '').trim();
+              doc.splitTextToSize(txt, maxW).forEach(l => result.push(l));
+            } else {
+              const txt = t.replace(/\*\*(.+?)\*\*/g, '$1').replace(/[*_`#>]/g, '').trim();
+              if (txt) doc.splitTextToSize(txt, maxW).forEach(l => result.push(l));
+            }
+          });
+        });
+        return result.length ? result : ['—'];
+      };
+
+      const TW = 34; // team label column, matches ~148px online
       const RW = CONTENT_W - TW;
+
+      const TEAMS = (rd) => [
+        {
+          label:      'Red Team',
+          agentName:  rd.red_agent_name  || 'Red Agent',
+          response:   rd.red_response,
+          teamColor:  [207, 33, 33],
+          badgeBg:    [255, 245, 245],
+          badgeBorder:[207, 33, 33],
+          rowBg:      [255, 249, 249],
+          divColor:   [247, 193, 193],
+        },
+        {
+          label:      'Blue Team',
+          agentName:  rd.blue_agent_name || 'Blue Agent',
+          response:   rd.blue_response,
+          teamColor:  [37, 99, 235],
+          badgeBg:    [245, 248, 255],
+          badgeBorder:[37, 99, 235],
+          rowBg:      [249, 251, 255],
+          divColor:   [184, 207, 250],
+        },
+      ];
 
       session.rounds.forEach((rd) => {
         y += 4;
-        checkPage(18);
+        checkPage(22);
 
-        // Round sub-header bar
-        doc.setFillColor(237, 242, 255);
-        doc.rect(ML, y - 4, CONTENT_W, 9, 'F');
+        // Round header — muted gray, matches bg-muted/40
+        const HDR_H = 9;
+        doc.setFillColor(243, 244, 246);
+        doc.rect(ML, y, CONTENT_W, HDR_H, 'F');
         doc.setDrawColor(...BORDER); doc.setLineWidth(0.2);
-        doc.rect(ML, y - 4, CONTENT_W, 9, 'S');
-        doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(22, 78, 162);
-        doc.text(`Round ${rd.round_number}`, ML + 3, y + 0.5);
+        doc.rect(ML, y, CONTENT_W, HDR_H, 'S');
+        // ⚔ swords icon substitute
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 150, 150);
+        doc.text('⚔', ML + 3.5, y + 6.2);
+        // "ROUND N" uppercase muted label
+        doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(120, 120, 120);
+        doc.text(`ROUND ${rd.round_number}`, ML + 9.5, y + 6.2);
         if (rd.timestamp) {
-          doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(130, 130, 130);
-          doc.text(new Date(rd.timestamp).toLocaleTimeString(), ML + CONTENT_W - 3, y + 0.5, { align: 'right' });
+          doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(160, 160, 160);
+          doc.text(new Date(rd.timestamp).toLocaleTimeString(), ML + CONTENT_W - 3, y + 6.2, { align: 'right' });
         }
-        y += 7;
+        y += HDR_H;
 
-        // Red team row
-        drawRow([
-          { text: `Red Team\n${rd.red_agent_name || 'Red Agent'}`, width: TW, bold: true, color: [180, 20, 20], size: 7.5 },
-          { text: rd.red_response || '—', width: RW, size: 7.5 },
-        ], { bg: [255, 248, 248], topBorder: true });
+        TEAMS(rd).forEach(({ label, agentName, response, teamColor, badgeBg, badgeBorder, rowBg, divColor }, ti) => {
+          const respLines  = processMdLines(response, RW - PAD_H * 2, 7.5);
+          doc.setFontSize(7.5);
+          const nameLns    = doc.splitTextToSize(agentName, TW - PAD_H * 2 - 1);
+          const BADGE_H_PX = 5;
+          const leftH      = PAD_V + BADGE_H_PX + 2.5 + nameLns.length * LINE_H + PAD_V;
+          const rightH     = PAD_V + respLines.length * LINE_H + PAD_V;
+          const rowH       = Math.max(leftH, rightH, 14);
+          checkPage(rowH + 2);
 
-        // Blue team row
-        drawRow([
-          { text: `Blue Team\n${rd.blue_agent_name || 'Blue Agent'}`, width: TW, bold: true, color: [30, 64, 175], size: 7.5 },
-          { text: rd.blue_response || '—', width: RW, size: 7.5 },
-        ], { bg: [248, 250, 255], topBorder: false });
+          // Row background
+          doc.setFillColor(...rowBg);
+          doc.rect(ML, y, CONTENT_W, rowH, 'F');
 
-        y += 2;
+          // Outer borders
+          doc.setDrawColor(...BORDER); doc.setLineWidth(0.2);
+          if (ti === 0) doc.line(ML, y, ML + CONTENT_W, y);
+          doc.line(ML, y + rowH, ML + CONTENT_W, y + rowH);
+          doc.line(ML, y, ML, y + rowH);
+          doc.line(ML + CONTENT_W, y, ML + CONTENT_W, y + rowH);
+
+          // Colored column divider matching border-r-{team}/20
+          doc.setDrawColor(...divColor); doc.setLineWidth(0.6);
+          doc.line(ML + TW, y, ML + TW, y + rowH);
+
+          // ── Team badge (outline style matching Badge variant="outline")
+          doc.setFontSize(7);
+          const badgeTxtW = doc.getTextWidth(label);
+          const BX = ML + PAD_H;
+          const BY = y + PAD_V;
+          const BW = badgeTxtW + 4;
+          doc.setFillColor(...badgeBg);
+          doc.roundedRect(BX, BY, BW, BADGE_H_PX, 0.9, 0.9, 'F');
+          doc.setDrawColor(...badgeBorder); doc.setLineWidth(0.3);
+          doc.roundedRect(BX, BY, BW, BADGE_H_PX, 0.9, 0.9, 'S');
+          doc.setTextColor(...teamColor); doc.setFont('helvetica', 'bold');
+          doc.text(label, BX + 2, BY + 3.6);
+
+          // ── Agent name below badge (semibold dark)
+          doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(40, 40, 40);
+          nameLns.forEach((nl, nli) => {
+            doc.text(nl, ML + PAD_H, BY + BADGE_H_PX + 3 + nli * LINE_H);
+          });
+
+          // ── Response text (right column, full markdown structure)
+          doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50);
+          const textBaseY = y + PAD_V + LINE_H * 0.75;
+          respLines.forEach((line, li) => {
+            doc.text(line || '', ML + TW + PAD_H, textBaseY + li * LINE_H);
+          });
+
+          y += rowH;
+        });
+
+        y += 3;
       });
     }
 
