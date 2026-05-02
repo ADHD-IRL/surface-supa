@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText } from 'lucide-react';
+import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ── Parser (AgentDebate markdown format) ─────────────────────────────────────
@@ -22,7 +23,7 @@ function getSection(lines, startIdx, label) {
 
 function parseAgentBlock(blockLines) {
   const agent = {
-    name: '', discipline: '', persona_description: '', cognitive_bias: '',
+    name: '', discipline: '', category: '', persona_description: '', cognitive_bias: '',
     red_team_focus: '', severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
     domain_tags: [], expertise_level: 'Senior', reasoning_style: 'Analytical',
@@ -40,6 +41,9 @@ function parseAgentBlock(blockLines) {
     const idx = blockLines.findIndex(l => new RegExp(`\\*\\*${label}:\\*\\*`, 'i').test(l));
     return idx === -1 ? null : getSection(blockLines, idx, label);
   };
+
+  const category = findAndGet('Category');
+  if (category) agent.category = category.trim();
 
   const persona = findAndGet('Persona');
   if (persona) agent.persona_description = persona;
@@ -114,6 +118,8 @@ const sevConfig = {
 
 const FORMAT_EXAMPLE = `## Agent Name / Discipline
 
+**Category:** My Custom Category
+
 **Persona:** 3–4 sentence career history and worldview.
 
 **Cognitive Bias:** What this agent systematically underweights.
@@ -140,6 +146,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
   const [text, setText] = useState('');
   const [parsed, setParsed] = useState(null);
   const [teamMap, setTeamMap] = useState({});
+  const [categoryMap, setCategoryMap] = useState({});
   const [selected, setSelected] = useState(new Set());
   const [showFormat, setShowFormat] = useState(false);
   const [error, setError] = useState('');
@@ -151,12 +158,15 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
     if (!agents.length) { setError('No agent blocks found. Check the format guide below.'); return; }
     setParsed(agents);
     const defaultTeams = {};
+    const defaultCategories = {};
     const defaultSelected = new Set();
     agents.forEach((a, i) => {
       defaultTeams[i] = 'red';
+      defaultCategories[i] = a.category || '';
       defaultSelected.add(i);
     });
     setTeamMap(defaultTeams);
+    setCategoryMap(defaultCategories);
     setSelected(defaultSelected);
   };
 
@@ -170,6 +180,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
     const agents = [...selected].map(i => ({
       ...parsed[i],
       team: teamMap[i] || 'red',
+      category: categoryMap[i] || '',
       avatar_color: teamMap[i] === 'blue' ? '#2563EB' : '#DC2626',
       status: 'active',
     }));
@@ -270,8 +281,8 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                   )}
                 </div>
 
-                {/* Team picker per agent */}
-                <div onClick={e => e.stopPropagation()} className="flex-shrink-0">
+                {/* Category + team pickers per agent */}
+                <div onClick={e => e.stopPropagation()} className="flex flex-col gap-1.5 flex-shrink-0 items-end">
                   <Select
                     value={teamMap[i] || 'red'}
                     onValueChange={v => setTeamMap(m => ({ ...m, [i]: v }))}
@@ -288,6 +299,15 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                       </SelectItem>
                     </SelectContent>
                   </Select>
+                  <div className="relative">
+                    <FolderOpen className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                    <Input
+                      value={categoryMap[i] || ''}
+                      onChange={e => setCategoryMap(m => ({ ...m, [i]: e.target.value }))}
+                      placeholder="Category…"
+                      className="h-7 w-28 text-xs pl-6 pr-2"
+                    />
+                  </div>
                 </div>
               </div>
             ))}
