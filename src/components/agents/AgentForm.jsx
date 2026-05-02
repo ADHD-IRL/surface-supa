@@ -32,7 +32,7 @@ function VectorSlider({ label, value, onChange }) {
 
 export default function AgentForm({ agent, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
-    name: '', discipline: '', team: 'red', domain_tags: [],
+    name: '', discipline: '', category: '', team: 'red', domain_tags: [],
     expertise_level: 'Senior', reasoning_style: 'Analytical', severity_default: 'HIGH',
     persona_description: '', cognitive_bias: '', red_team_focus: '',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
@@ -44,6 +44,7 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
       setForm({
         name:                agent.name                || '',
         discipline:          agent.discipline          || '',
+        category:            agent.category            || '',
         team:                agent.team                || 'red',
         domain_tags:         agent.domain_tags         || [],
         expertise_level:     agent.expertise_level     || 'Senior',
@@ -89,6 +90,11 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
           <Label className="text-xs font-semibold">Discipline</Label>
           <Input placeholder="e.g. SCRM / Hardware Security" value={form.discipline} onChange={e => set('discipline', e.target.value)} />
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-xs font-semibold">Category</Label>
+        <Input placeholder="e.g. Community Planning, Cyber Operations" value={form.category} onChange={e => set('category', e.target.value)} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

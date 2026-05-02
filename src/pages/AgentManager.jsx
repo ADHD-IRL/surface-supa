@@ -153,6 +153,18 @@ export default function AgentManager() {
         key: s, label: s, items: sorted.filter(a => (a.severity_default || 'HIGH') === s),
       })).filter(g => g.items.length > 0);
     }
+    if (groupBy === 'category') {
+      const cats = [...new Set(sorted.map(a => a.category || ''))].sort((a, b) => {
+        if (!a) return 1;
+        if (!b) return -1;
+        return a.localeCompare(b);
+      });
+      return cats.map(c => ({
+        key: c || '__none',
+        label: c || 'Uncategorized',
+        items: sorted.filter(a => (a.category || '') === c),
+      })).filter(g => g.items.length > 0);
+    }
     return [];
   }, [sorted, groupBy]);
 
@@ -267,6 +279,7 @@ export default function AgentManager() {
               <SelectItem value="team">Team</SelectItem>
               <SelectItem value="domain">Domain</SelectItem>
               <SelectItem value="severity">Severity</SelectItem>
+              <SelectItem value="category">Category</SelectItem>
             </SelectContent>
           </Select>
         </div>

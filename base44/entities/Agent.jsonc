@@ -6,6 +6,10 @@
       "type": "string",
       "description": "Agent display name"
     },
+    "category": {
+      "type": "string",
+      "description": "Free-form category label used to group agents (e.g. Community Planning, Cyber Operations)"
+    },
     "discipline": {
       "type": "string",
       "description": "Agent discipline or specialty (e.g. SCRM / Hardware Security)"
