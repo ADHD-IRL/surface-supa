@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Plus } from 'lucide-react';
+import { Plus, Upload } from 'lucide-react';
 import AgentCard from '@/components/agents/AgentCard';
 import AgentForm from '@/components/agents/AgentForm';
+import AgentImportModal from '@/components/agents/AgentImportModal';
 
 export default function AgentManager() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(null); // null | 'new' | agent object
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['agents'],
@@ -52,6 +54,14 @@ export default function AgentManager() {
     setShowForm(true);
   };
 
+  const importMutation = useMutation({
+    mutationFn: (agentList) => Promise.all(agentList.map(a => base44.entities.Agent.create(a))),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      setShowImport(false);
+    },
+  });
+
   const handleDelete = (agent) => {
     if (confirm(`Delete agent "${agent.name}"?`)) {
       deleteMutation.mutate(agent.id);
@@ -76,13 +86,30 @@ export default function AgentManager() {
           <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage Red and Blue team AI agents</p>
         </div>
-        <Button
-          onClick={() => { setEditing('new'); setShowForm(true); }}
-          className="gap-2"
-        >
-          <Plus className="w-4 h-4" /> Create Agent
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { setShowForm(false); setShowImport(true); }}
+            className="gap-2"
+          >
+            <Upload className="w-4 h-4" /> Import
+          </Button>
+          <Button
+            onClick={() => { setShowImport(false); setEditing('new'); setShowForm(true); }}
+            className="gap-2"
+          >
+            <Plus className="w-4 h-4" /> Create Agent
+          </Button>
+        </div>
       </div>
+
+      {showImport && (
+        <AgentImportModal
+          onImport={(agentList) => importMutation.mutate(agentList)}
+          onCancel={() => setShowImport(false)}
+          importing={importMutation.isPending}
+        />
+      )}
 
       {showForm && (
         <AgentForm

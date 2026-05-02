@@ -52,6 +52,21 @@ export default function SessionDetail() {
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
 
+  const buildAgentSystemPrompt = (agent) => {
+    if (agent.persona_description) {
+      return [
+        `You are ${agent.name}${agent.discipline ? `, ${agent.discipline}` : ''}.`,
+        agent.persona_description,
+        agent.expertise_level ? `Expertise level: ${agent.expertise_level}.` : '',
+        agent.reasoning_style ? `Reasoning style: ${agent.reasoning_style}.` : '',
+        agent.cognitive_bias ? `\nYour cognitive bias to be aware of: ${agent.cognitive_bias}` : '',
+        agent.red_team_focus ? `\nYour primary focus: ${agent.red_team_focus}` : '',
+        agent.severity_default ? `\nDefault severity lens: ${agent.severity_default}.` : '',
+      ].filter(Boolean).join('\n');
+    }
+    return agent.system_prompt || '';
+  };
+
   const runDebateMutation = useMutation({
     mutationFn: async () => {
       setRunningStep('Starting debate...');
@@ -75,7 +90,7 @@ export default function SessionDetail() {
           `Round ${rd.round_number}:\nRed (${rd.red_agent_name}): ${rd.red_response}\nBlue (${rd.blue_agent_name}): ${rd.blue_response}`
         ).join('\n\n');
 
-        const redPrompt = `${redAgent.system_prompt}\n\nScenario: ${session.scenario}\n${session.reference_urls?.length ? `\nReference URLs: ${session.reference_urls.join(', ')}` : ''}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your Round ${r + 1} attack analysis. Identify specific threats, vulnerabilities, and attack chains. Be detailed and actionable.`;
+        const redPrompt = `${buildAgentSystemPrompt(redAgent)}\n\nScenario: ${session.scenario}\n${session.reference_urls?.length ? `\nReference URLs: ${session.reference_urls.join(', ')}` : ''}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your Round ${r + 1} attack analysis. Identify specific threats, vulnerabilities, and attack chains. Be detailed and actionable.`;
 
         const redResponse = await base44.integrations.Core.InvokeLLM({ prompt: redPrompt });
 
@@ -97,7 +112,7 @@ export default function SessionDetail() {
 
         setRunningStep(`Round ${r + 1}: Blue team responding...`);
 
-        const bluePrompt = `${blueAgent.system_prompt}\n\nScenario: ${session.scenario}\n\nRed team attack analysis (Round ${r + 1}, by ${redAgent.name}):\n${redResponse}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your defensive response. Counter each attack vector with specific mitigations, detection methods, and resilience measures. Be practical and implementable.`;
+        const bluePrompt = `${buildAgentSystemPrompt(blueAgent)}\n\nScenario: ${session.scenario}\n\nRed team attack analysis (Round ${r + 1}, by ${redAgent.name}):\n${redResponse}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your defensive response. Counter each attack vector with specific mitigations, detection methods, and resilience measures. Be practical and implementable.`;
 
         const blueResponse = await base44.integrations.Core.InvokeLLM({ prompt: bluePrompt });
 
