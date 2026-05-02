@@ -2,7 +2,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, CheckSquare2, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const sevConfig = {
@@ -25,12 +25,23 @@ function VectorBar({ label, value }) {
   );
 }
 
-export default function AgentCard({ agent, onEdit, onDelete }) {
+export default function AgentCard({ agent, onEdit, onDelete, selectable, selected, onSelect }) {
   const hasVectors = agent.vector_human != null || agent.vector_technical != null;
   const firstSentence = (agent.persona_description || '').split(/[.!?]/)[0].trim();
 
   return (
-    <Card className="p-5 bg-card border border-border hover:border-primary/20 transition-colors">
+    <Card
+      onClick={selectable ? onSelect : undefined}
+      className={cn(
+        "p-5 bg-card border transition-colors",
+        selectable
+          ? "cursor-pointer select-none"
+          : "hover:border-primary/20",
+        selected
+          ? "border-primary ring-1 ring-primary bg-primary/5"
+          : "border-border"
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         {/* Avatar + identity */}
         <div className="flex items-start gap-3 min-w-0">
@@ -69,15 +80,25 @@ export default function AgentCard({ agent, onEdit, onDelete }) {
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-1 flex-shrink-0">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(agent)}>
-            <Pencil className="w-3.5 h-3.5" />
-          </Button>
-          {!agent.is_default && (
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(agent)}>
-              <Trash2 className="w-3.5 h-3.5" />
-            </Button>
+        {/* Actions or selection indicator */}
+        <div className="flex gap-1 flex-shrink-0" onClick={e => selectable && e.stopPropagation()}>
+          {selectable ? (
+            selected
+              ? <CheckSquare2 className="w-5 h-5 text-primary" />
+              : <Square className="w-5 h-5 text-muted-foreground/40" />
+          ) : (
+            <>
+              {onEdit && (
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(agent)}>
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
+              )}
+              {onDelete && !agent.is_default && (
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(agent)}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
