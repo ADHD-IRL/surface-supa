@@ -6,6 +6,10 @@
       "type": "string",
       "description": "Agent display name"
     },
+    "discipline": {
+      "type": "string",
+      "description": "Agent discipline or specialty (e.g. SCRM / Hardware Security)"
+    },
     "team": {
       "type": "string",
       "enum": [
@@ -19,7 +23,74 @@
       "items": {
         "type": "string"
       },
-      "description": "Domain expertise tags like cyber, geopolitical, financial, operational, strategic"
+      "description": "Domain expertise tags: cyber, geopolitical, financial, operational, strategic"
+    },
+    "expertise_level": {
+      "type": "string",
+      "enum": [
+        "Junior",
+        "Mid-Level",
+        "Senior",
+        "Principal",
+        "World-Class"
+      ],
+      "default": "Senior",
+      "description": "Agent expertise level"
+    },
+    "reasoning_style": {
+      "type": "string",
+      "enum": [
+        "Analytical",
+        "Intuitive",
+        "Contrarian",
+        "Systematic",
+        "Probabilistic"
+      ],
+      "default": "Analytical",
+      "description": "Agent reasoning style"
+    },
+    "severity_default": {
+      "type": "string",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ],
+      "default": "HIGH",
+      "description": "Default severity lens for this agent"
+    },
+    "persona_description": {
+      "type": "string",
+      "description": "3-4 sentence career history and worldview"
+    },
+    "cognitive_bias": {
+      "type": "string",
+      "description": "What this agent systematically underweights"
+    },
+    "red_team_focus": {
+      "type": "string",
+      "description": "Primary focus: threats the agent hunts (red) or defenses championed (blue)"
+    },
+    "vector_human": {
+      "type": "number",
+      "description": "Human threat vector weight 0-100",
+      "default": 50
+    },
+    "vector_technical": {
+      "type": "number",
+      "description": "Technical threat vector weight 0-100",
+      "default": 50
+    },
+    "vector_physical": {
+      "type": "number",
+      "description": "Physical threat vector weight 0-100",
+      "default": 30
+    },
+    "vector_futures": {
+      "type": "number",
+      "description": "Futures/emerging threat vector weight 0-100",
+      "default": 40
     },
     "tone": {
       "type": "string",
@@ -35,7 +106,7 @@
     },
     "system_prompt": {
       "type": "string",
-      "description": "Custom system prompt for the agent"
+      "description": "Legacy system prompt (used if persona_description is not set)"
     },
     "is_default": {
       "type": "boolean",
