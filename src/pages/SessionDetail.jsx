@@ -18,6 +18,7 @@ import ChainDiagram from '@/components/session/ChainDiagram';
 import MitigationTable from '@/components/session/MitigationTable';
 import MitigationPlaybook from '@/components/session/MitigationPlaybook';
 import ReactMarkdown from 'react-markdown';
+import { buildAgentSystemPrompt } from '@/lib/agentData';
 
 export default function SessionDetail() {
   const { id } = useParams();
@@ -51,21 +52,6 @@ export default function SessionDetail() {
   });
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
-
-  const buildAgentSystemPrompt = (agent) => {
-    if (agent.persona_description) {
-      return [
-        `You are ${agent.name}${agent.discipline ? `, ${agent.discipline}` : ''}.`,
-        agent.persona_description,
-        agent.expertise_level ? `Expertise level: ${agent.expertise_level}.` : '',
-        agent.reasoning_style ? `Reasoning style: ${agent.reasoning_style}.` : '',
-        agent.cognitive_bias ? `\nYour cognitive bias to be aware of: ${agent.cognitive_bias}` : '',
-        agent.red_team_focus ? `\nYour primary focus: ${agent.red_team_focus}` : '',
-        agent.severity_default ? `\nDefault severity lens: ${agent.severity_default}.` : '',
-      ].filter(Boolean).join('\n');
-    }
-    return agent.system_prompt || '';
-  };
 
   const runDebateMutation = useMutation({
     mutationFn: async () => {

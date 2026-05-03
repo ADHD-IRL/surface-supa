@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Pencil, Trash2, CheckSquare2, Square, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveAgent } from '@/lib/agentData';
 
 const sevConfig = {
   CRITICAL: 'bg-red-600 text-white',
@@ -25,7 +26,8 @@ function VectorBar({ label, value }) {
   );
 }
 
-export default function AgentCard({ agent, onEdit, onDelete, selectable, selected, onSelect }) {
+export default function AgentCard({ agent: rawAgent, onEdit, onDelete, selectable, selected, onSelect }) {
+  const agent = resolveAgent(rawAgent);
   const hasVectors = agent.vector_human != null || agent.vector_technical != null;
   const firstSentence = (agent.persona_description || '').split(/[.!?]/)[0].trim();
 
