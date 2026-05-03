@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { encodeAgentData } from '@/lib/agentData';
 
 // ── Parser (AgentDebate markdown format) ─────────────────────────────────────
 
@@ -177,13 +178,19 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
   });
 
   const handleImport = () => {
-    const agents = [...selected].map(i => ({
-      ...parsed[i],
-      team: teamMap[i] || 'red',
-      category: categoryMap[i] || '',
-      avatar_color: teamMap[i] === 'blue' ? '#2563EB' : '#DC2626',
-      status: 'active',
-    }));
+    const agents = [...selected].map(i => {
+      const base = {
+        ...parsed[i],
+        team: teamMap[i] || 'red',
+        category: categoryMap[i] || '',
+        avatar_color: teamMap[i] === 'blue' ? '#2563EB' : '#DC2626',
+        status: 'active',
+      };
+      // Always encode structured data into system_prompt so it survives
+      // even if the backend schema hasn't picked up the new fields yet.
+      base.system_prompt = encodeAgentData(base);
+      return base;
+    });
     onImport(agents);
   };
 

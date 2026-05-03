@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X, Save } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveAgent, encodeAgentData } from '@/lib/agentData';
 
 const DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
 const EXPERTISE_LEVELS = ['Junior', 'Mid-Level', 'Senior', 'Principal', 'World-Class'];
@@ -41,24 +42,25 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
 
   useEffect(() => {
     if (agent) {
+      const a = resolveAgent(agent); // decode JSON fallback if individual fields are missing
       setForm({
-        name:                agent.name                || '',
-        discipline:          agent.discipline          || '',
-        category:            agent.category            || '',
-        team:                agent.team                || 'red',
-        domain_tags:         agent.domain_tags         || [],
-        expertise_level:     agent.expertise_level     || 'Senior',
-        reasoning_style:     agent.reasoning_style     || 'Analytical',
-        severity_default:    agent.severity_default    || 'HIGH',
-        persona_description: agent.persona_description || '',
-        cognitive_bias:      agent.cognitive_bias      || '',
-        red_team_focus:      agent.red_team_focus      || '',
-        vector_human:        agent.vector_human        ?? 50,
-        vector_technical:    agent.vector_technical    ?? 50,
-        vector_physical:     agent.vector_physical     ?? 30,
-        vector_futures:      agent.vector_futures      ?? 40,
-        avatar_color:        agent.avatar_color        || '#DC2626',
-        status:              agent.status              || 'active',
+        name:                a.name                || '',
+        discipline:          a.discipline          || '',
+        category:            a.category            || '',
+        team:                a.team                || 'red',
+        domain_tags:         a.domain_tags         || [],
+        expertise_level:     a.expertise_level     || 'Senior',
+        reasoning_style:     a.reasoning_style     || 'Analytical',
+        severity_default:    a.severity_default    || 'HIGH',
+        persona_description: a.persona_description || '',
+        cognitive_bias:      a.cognitive_bias      || '',
+        red_team_focus:      a.red_team_focus      || '',
+        vector_human:        a.vector_human        ?? 50,
+        vector_technical:    a.vector_technical    ?? 50,
+        vector_physical:     a.vector_physical     ?? 30,
+        vector_futures:      a.vector_futures      ?? 40,
+        avatar_color:        a.avatar_color        || '#DC2626',
+        status:              a.status              || 'active',
       });
     }
   }, [agent]);
@@ -209,7 +211,7 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
 
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button onClick={() => onSave(form)} disabled={!form.name || saving} className="gap-2">
+        <Button onClick={() => onSave({ ...form, system_prompt: encodeAgentData(form) })} disabled={!form.name || saving} className="gap-2">
           {saving
             ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             : <><Save className="w-4 h-4" /> {agent ? 'Update' : 'Create'} Agent</>}
