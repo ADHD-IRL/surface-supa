@@ -251,6 +251,23 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
             </Button>
           </div>
 
+          {/* Bulk team assignment */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
+            <span className="text-xs text-muted-foreground mr-1">Set all to</span>
+            <button
+              onClick={() => setTeamMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'red'])))}
+              className="px-3 py-1 rounded text-xs font-medium border border-red-team/30 text-red-team bg-red-team/5 hover:bg-red-team/15 transition-colors"
+            >
+              Red Team
+            </button>
+            <button
+              onClick={() => setTeamMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'blue'])))}
+              className="px-3 py-1 rounded text-xs font-medium border border-blue-team/30 text-blue-team bg-blue-team/5 hover:bg-blue-team/15 transition-colors"
+            >
+              Blue Team
+            </button>
+          </div>
+
           <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
             {parsed.map((agent, i) => (
               <div
