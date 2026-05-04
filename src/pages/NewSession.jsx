@@ -245,12 +245,6 @@ export default function NewSession() {
                     : "border-border hover:border-primary/30"
                 )}
               >
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                  style={{ backgroundColor: agent.avatar_color || (agent.team === 'red' ? '#DC2626' : '#2563EB') }}
-                >
-                  {agent.name.charAt(0)}
-                </div>
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{agent.name}</p>
                   <p className="text-xs text-muted-foreground capitalize">{agent.team} team</p>
