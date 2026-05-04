@@ -2,7 +2,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Pencil, Trash2, CheckSquare2, Square, FolderOpen } from 'lucide-react';
+import { Pencil, Trash2, CheckSquare2, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveAgent } from '@/lib/agentData';
 
@@ -96,14 +96,6 @@ export default function AgentCard({ agent: rawAgent, onEdit, onDelete, selectabl
           )}
         </div>
       </div>
-
-      {/* Category */}
-      {agent.category && (
-        <div className="flex items-center gap-1 mt-2">
-          <FolderOpen className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-          <span className="text-[11px] text-muted-foreground truncate">{agent.category}</span>
-        </div>
-      )}
 
       {/* Persona snippet */}
       {firstSentence && (

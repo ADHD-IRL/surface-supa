@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Save } from 'lucide-react';
+import { X, Save, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveAgent, encodeAgentData } from '@/lib/agentData';
 
-const DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
+const COMMON_DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
 const EXPERTISE_LEVELS = ['Junior', 'Mid-Level', 'Senior', 'Principal', 'World-Class'];
 const REASONING_STYLES = ['Analytical', 'Intuitive', 'Contrarian', 'Systematic', 'Probabilistic'];
 const SEVERITY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
@@ -31,9 +32,78 @@ function VectorSlider({ label, value, onChange }) {
   );
 }
 
+function DomainTagInput({ tags, onChange }) {
+  const [input, setInput] = useState('');
+  const inputRef = useRef(null);
+
+  const addTag = (raw) => {
+    const tag = raw.trim().toLowerCase();
+    if (!tag || tags.includes(tag)) return;
+    onChange([...tags, tag]);
+    setInput('');
+  };
+
+  const removeTag = (t) => onChange(tags.filter(x => x !== t));
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(input);
+    } else if (e.key === 'Backspace' && !input && tags.length) {
+      removeTag(tags[tags.length - 1]);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {/* Existing tag chips */}
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {tags.map(t => (
+            <Badge key={t} variant="secondary" className="text-xs px-2 py-0.5 gap-1 capitalize">
+              {t}
+              <button onClick={() => removeTag(t)} className="ml-0.5 hover:text-destructive">
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {/* Free-text input */}
+      <div className="flex gap-2">
+        <Input
+          ref={inputRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type a domain tag and press Enter…"
+          className="text-xs h-8"
+        />
+        <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => addTag(input)} disabled={!input.trim()}>
+          <Plus className="w-3.5 h-3.5" />
+        </Button>
+      </div>
+
+      {/* Common domain quick-add */}
+      <div className="flex flex-wrap gap-1.5">
+        {COMMON_DOMAINS.filter(d => !tags.includes(d)).map(d => (
+          <button
+            key={d}
+            onClick={() => addTag(d)}
+            className="px-2 py-0.5 rounded text-[11px] font-medium capitalize border border-dashed border-border text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+          >
+            + {d}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AgentForm({ agent, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
-    name: '', discipline: '', category: '', team: 'red', domain_tags: [],
+    name: '', discipline: '', team: 'red', domain_tags: [],
     expertise_level: 'Senior', reasoning_style: 'Analytical', severity_default: 'HIGH',
     persona_description: '', cognitive_bias: '', red_team_focus: '',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
@@ -42,11 +112,10 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
 
   useEffect(() => {
     if (agent) {
-      const a = resolveAgent(agent); // decode JSON fallback if individual fields are missing
+      const a = resolveAgent(agent);
       setForm({
         name:                a.name                || '',
         discipline:          a.discipline          || '',
-        category:            a.category            || '',
         team:                a.team                || 'red',
         domain_tags:         a.domain_tags         || [],
         expertise_level:     a.expertise_level     || 'Senior',
@@ -66,11 +135,6 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
   }, [agent]);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
-  const toggleDomain = (d) => setForm(f => ({
-    ...f,
-    domain_tags: f.domain_tags.includes(d) ? f.domain_tags.filter(x => x !== d) : [...f.domain_tags, d],
-  }));
-
   const sevColor = { LOW: 'text-green-600', MEDIUM: 'text-amber-600', HIGH: 'text-orange-600', CRITICAL: 'text-red-600' };
 
   return (
@@ -92,11 +156,6 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
           <Label className="text-xs font-semibold">Discipline</Label>
           <Input placeholder="e.g. SCRM / Hardware Security" value={form.discipline} onChange={e => set('discipline', e.target.value)} />
         </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs font-semibold">Category</Label>
-        <Input placeholder="e.g. Community Planning, Cyber Operations" value={form.category} onChange={e => set('category', e.target.value)} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -154,19 +213,14 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
         </div>
       </div>
 
+      {/* Domain Tags */}
       <div className="space-y-2">
         <Label className="text-xs font-semibold">Domain Tags</Label>
-        <div className="flex flex-wrap gap-2">
-          {DOMAINS.map(domain => (
-            <button key={domain} onClick={() => toggleDomain(domain)}
-              className={cn("px-3 py-1.5 rounded-lg text-xs font-medium capitalize border transition-colors",
-                form.domain_tags.includes(domain)
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-muted text-muted-foreground border-border hover:border-primary/30")}>
-              {domain}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-muted-foreground -mt-1">Tags define the agent's category — used to group and filter agents.</p>
+        <DomainTagInput
+          tags={form.domain_tags}
+          onChange={tags => set('domain_tags', tags)}
+        />
       </div>
 
       {/* Persona section */}

@@ -2,10 +2,9 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText, FolderOpen } from 'lucide-react';
+import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { encodeAgentData } from '@/lib/agentData';
 
@@ -24,7 +23,7 @@ function getSection(lines, startIdx, label) {
 
 function parseAgentBlock(blockLines) {
   const agent = {
-    name: '', discipline: '', category: '', persona_description: '', cognitive_bias: '',
+    name: '', discipline: '', persona_description: '', cognitive_bias: '',
     red_team_focus: '', severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
     domain_tags: [], expertise_level: 'Senior', reasoning_style: 'Analytical',
@@ -43,8 +42,12 @@ function parseAgentBlock(blockLines) {
     return idx === -1 ? null : getSection(blockLines, idx, label);
   };
 
+  // Category → treat as a domain tag (categories ARE domains)
   const category = findAndGet('Category');
-  if (category) agent.category = category.trim();
+  if (category) {
+    const catTag = category.trim().toLowerCase();
+    if (catTag && !agent.domain_tags.includes(catTag)) agent.domain_tags.push(catTag);
+  }
 
   const persona = findAndGet('Persona');
   if (persona) agent.persona_description = persona;
@@ -75,13 +78,13 @@ function parseAgentBlock(blockLines) {
   const tagsLine = findAndGet('Tags');
   if (tagsLine) {
     const tags = tagsLine.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-    agent.domain_tags = tags;
+    tags.forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
   }
 
   const domainTagsLine = findAndGet('Domain Tags');
   if (domainTagsLine && !/all domains/i.test(domainTagsLine)) {
     const dTags = domainTagsLine.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean);
-    if (dTags.length) agent.domain_tags = [...new Set([...agent.domain_tags, ...dTags])];
+    dTags.forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
   }
 
   return agent;
@@ -112,11 +115,9 @@ const sevConfig = {
   LOW:      'bg-green-500 text-white',
 };
 
-// ── Format guide shown in the modal ──────────────────────────────────────────
+// ── Format guide ──────────────────────────────────────────────────────────────
 
 const FORMAT_EXAMPLE = `## Agent Name / Discipline
-
-**Category:** My Custom Category
 
 **Persona:** 3–4 sentence career history and worldview.
 
@@ -132,7 +133,7 @@ const FORMAT_EXAMPLE = `## Agent Name / Discipline
 - Physical: 30
 - Futures: 40
 
-**Tags:** cyber, supply-chain
+**Tags:** cyber, supply-chain, community-planning
 
 ---
 
@@ -144,7 +145,6 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
   const [text, setText] = useState('');
   const [parsed, setParsed] = useState(null);
   const [teamMap, setTeamMap] = useState({});
-  const [categoryMap, setCategoryMap] = useState({});
   const [selected, setSelected] = useState(new Set());
   const [showFormat, setShowFormat] = useState(false);
   const [error, setError] = useState('');
@@ -156,15 +156,12 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
     if (!agents.length) { setError('No agent blocks found. Check the format guide below.'); return; }
     setParsed(agents);
     const defaultTeams = {};
-    const defaultCategories = {};
     const defaultSelected = new Set();
-    agents.forEach((a, i) => {
+    agents.forEach((_, i) => {
       defaultTeams[i] = 'red';
-      defaultCategories[i] = a.category || '';
       defaultSelected.add(i);
     });
     setTeamMap(defaultTeams);
-    setCategoryMap(defaultCategories);
     setSelected(defaultSelected);
   };
 
@@ -179,12 +176,9 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
       const base = {
         ...parsed[i],
         team: teamMap[i] || 'red',
-        category: categoryMap[i] || '',
         avatar_color: teamMap[i] === 'blue' ? '#2563EB' : '#DC2626',
         status: 'active',
       };
-      // Always encode structured data into system_prompt so it survives
-      // even if the backend schema hasn't picked up the new fields yet.
       base.system_prompt = encodeAgentData(base);
       return base;
     });
@@ -196,7 +190,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold">Import Agents</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Paste AgentDebate markdown format — one or many agents</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Paste AgentDebate markdown — domain tags become the agent's categories</p>
         </div>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCancel}>
           <X className="w-4 h-4" />
@@ -206,7 +200,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
       {!parsed ? (
         <>
           <Textarea
-            placeholder="## Agent Name / Discipline&#10;&#10;**Persona:** ...&#10;**Cognitive Bias:** ...&#10;**Primary Focus:** ...&#10;**Severity:** HIGH&#10;..."
+            placeholder="## Agent Name / Discipline&#10;&#10;**Persona:** ...&#10;**Cognitive Bias:** ...&#10;**Primary Focus:** ...&#10;**Severity:** HIGH&#10;**Tags:** cyber, supply-chain&#10;..."
             value={text}
             onChange={e => { setText(e.target.value); setError(''); }}
             className="min-h-[220px] resize-y font-mono text-xs"
@@ -293,17 +287,21 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                   {agent.persona_description && (
                     <p className="text-xs text-muted-foreground line-clamp-1">{agent.persona_description}</p>
                   )}
-                  {agent.domain_tags?.length > 0 && (
-                    <div className="flex gap-1 flex-wrap">
+                  {/* Domain tags = categories */}
+                  {agent.domain_tags?.length > 0 ? (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <Tag className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                       {agent.domain_tags.map(t => (
                         <Badge key={t} variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{t}</Badge>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground italic">No domain tags — add **Tags:** to markdown</p>
                   )}
                 </div>
 
-                {/* Category + team pickers per agent */}
-                <div onClick={e => e.stopPropagation()} className="flex flex-col gap-1.5 flex-shrink-0 items-end">
+                {/* Team picker per agent */}
+                <div onClick={e => e.stopPropagation()} className="flex-shrink-0">
                   <Select
                     value={teamMap[i] || 'red'}
                     onValueChange={v => setTeamMap(m => ({ ...m, [i]: v }))}
@@ -320,15 +318,6 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                  <div className="relative">
-                    <FolderOpen className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-                    <Input
-                      value={categoryMap[i] || ''}
-                      onChange={e => setCategoryMap(m => ({ ...m, [i]: e.target.value }))}
-                      placeholder="Category…"
-                      className="h-7 w-28 text-xs pl-6 pr-2"
-                    />
-                  </div>
                 </div>
               </div>
             ))}
