@@ -108,12 +108,6 @@ export default function AgentManager() {
 
   const domainEntityAvailable = !!base44.entities.Domain;
 
-  // Resolve or create a Domain entity by name (case-insensitive).
-  // Returns the domain id.
-  const domainEntityAvailable = !!base44.entities.Domain;
-
-  // Resolve or create a Domain entity by name (case-insensitive).
-  // Returns the domain id, or '' if the Domain entity isn't deployed yet.
   const resolveOrCreateDomain = async (name, currentDomains) => {
     if (!domainEntityAvailable) return '';
     const norm = name.trim().toLowerCase();
