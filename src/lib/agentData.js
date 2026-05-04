@@ -10,7 +10,7 @@ const STRUCTURED_FIELDS = [
   'persona_description', 'cognitive_bias', 'red_team_focus',
   'expertise_level', 'reasoning_style', 'severity_default',
   'vector_human', 'vector_technical', 'vector_physical', 'vector_futures',
-  'domain_tags',
+  'domain_tags', 'domain_id',
 ];
 
 export function encodeAgentData(agent) {

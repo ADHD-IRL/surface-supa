@@ -25,10 +25,10 @@ const VECTORS = [
   { key: 'vector_futures',   label: 'Futures',   color: '#7B2D8B' },
 ];
 
-export default function AgentCard({ agent: rawAgent, onEdit, onDelete, onClone, selectable, selected, onSelect }) {
+export default function AgentCard({ agent: rawAgent, domain, onEdit, onDelete, onClone, selectable, selected, onSelect }) {
   const agent = resolveAgent(rawAgent);
   const primaryTag = agent.domain_tags?.[0];
-  const barColor = agent.avatar_color || tagColor(primaryTag);
+  const barColor = agent.avatar_color || domain?.color || tagColor(primaryTag);
   const sev = SEV[agent.severity_default] || SEV.HIGH;
   const hasVectors = [agent.vector_human, agent.vector_technical, agent.vector_physical, agent.vector_futures]
     .some(v => v != null);
