@@ -6,7 +6,7 @@
 // individual fields will be present and the JSON fallback is bypassed automatically.
 
 const STRUCTURED_FIELDS = [
-  'discipline', 'category',
+  'discipline',
   'persona_description', 'cognitive_bias', 'red_team_focus',
   'expertise_level', 'reasoning_style', 'severity_default',
   'vector_human', 'vector_technical', 'vector_physical', 'vector_futures',
@@ -23,19 +23,30 @@ export function encodeAgentData(agent) {
   return JSON.stringify(payload);
 }
 
-// Returns the agent with structured fields resolved from either:
-//   (a) the individual schema fields (preferred, available once backend schema is deployed), or
-//   (b) a JSON-encoded system_prompt blob written by encodeAgentData()
+// Returns the agent with structured fields resolved.
+// system_prompt (written by encodeAgentData on every save/import) is always
+// the authoritative source because the backend may silently truncate array
+// fields like domain_tags to a single element. Scalar backend fields that are
+// non-empty still take precedence over the JSON blob so edits are respected.
 export function resolveAgent(agent) {
   if (!agent) return agent;
-  if (agent.persona_description) return agent; // individual fields exist
-  if (agent.system_prompt && agent.system_prompt.startsWith('{')) {
-    try {
-      const data = JSON.parse(agent.system_prompt);
-      if (data._v === 1) return { ...agent, ...data };
-    } catch {}
+  if (!agent.system_prompt || !agent.system_prompt.startsWith('{')) return agent;
+  try {
+    const data = JSON.parse(agent.system_prompt);
+    if (data._v !== 1) return agent;
+    // Merge: start from system_prompt data, then overlay non-empty backend scalars.
+    const merged = { ...data, ...agent };
+    // For arrays (domain_tags), prefer the system_prompt version which is always
+    // the full list written at save time.
+    for (const k of STRUCTURED_FIELDS) {
+      if (Array.isArray(data[k]) && data[k].length > (agent[k]?.length ?? 0)) {
+        merged[k] = data[k];
+      }
+    }
+    return merged;
+  } catch {
+    return agent;
   }
-  return agent;
 }
 
 export function buildAgentSystemPrompt(agent) {
