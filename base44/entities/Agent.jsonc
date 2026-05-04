@@ -6,9 +6,9 @@
       "type": "string",
       "description": "Agent display name"
     },
-    "category": {
+    "domain_id": {
       "type": "string",
-      "description": "Free-form category label used to group agents (e.g. Community Planning, Cyber Operations)"
+      "description": "Reference to Domain entity for categorization"
     },
     "discipline": {
       "type": "string",
@@ -27,7 +27,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Domain expertise tags: cyber, geopolitical, financial, operational, strategic"
+      "description": "Keyword search tags (not used for categorization — use domain_id for that)"
     },
     "expertise_level": {
       "type": "string",

@@ -1,0 +1,19 @@
+{
+  "name": "Domain",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Domain display name (e.g. Cyber, Community Planning)"
+    },
+    "color": {
+      "type": "string",
+      "description": "Hex color for this domain"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional description of this domain"
+    }
+  },
+  "required": ["name"]
+}

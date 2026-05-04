@@ -23,6 +23,7 @@ function parseAgentBlock(blockLines) {
     severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
     domain_tags: [], expertise_level: 'Senior', reasoning_style: 'Analytical',
+    _domain_name: '',
   };
 
   const h2 = blockLines.find(l => l.startsWith('## '));
@@ -38,11 +39,10 @@ function parseAgentBlock(blockLines) {
     return idx === -1 ? null : getSection(blockLines, idx, label);
   };
 
-  // **Category:** → domain tag
-  const category = findAndGet('Category');
+  // **Category:** or **Domain:** → primary domain (creates/finds Domain entity on import)
+  const category = findAndGet('Domain') || findAndGet('Category');
   if (category) {
-    const t = category.trim().toLowerCase();
-    if (t && !agent.domain_tags.includes(t)) agent.domain_tags.push(t);
+    agent._domain_name = category.trim();
   }
 
   const persona = findAndGet('Persona');
@@ -71,14 +71,13 @@ function parseAgentBlock(blockLines) {
     }
   }
 
-  // **Tags:** → domain tags
+  // **Tags:** and **Domain Tags:** → keyword search tags only
   const tagsLine = findAndGet('Tags');
   if (tagsLine) {
     tagsLine.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
       .forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
   }
 
-  // **Domain Tags:** → domain tags
   const domainTagsLine = findAndGet('Domain Tags');
   if (domainTagsLine && !/all domains/i.test(domainTagsLine)) {
     domainTagsLine.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean)
@@ -111,6 +110,8 @@ const SEV_COLORS = { CRITICAL: '#C0392B', HIGH: '#D68910', MEDIUM: '#2E86AB', LO
 // ── Format guide ──────────────────────────────────────────────────────────────
 
 const FORMAT_EXAMPLE = `## Agent Name / Discipline
+
+**Domain:** Cyber Operations
 
 **Persona:** 3–4 sentence career history and worldview.
 
@@ -221,12 +222,13 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
               <div className="px-4 pb-4 border-t border-border space-y-3">
                 <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
                   <li><span className="text-primary font-mono">## Agent Name</span> — H2 heading starts each agent (required)</li>
+                  <li><span className="text-primary font-mono">**Domain:**</span> — domain category (auto-created if new)</li>
                   <li><span className="text-primary font-mono">**Persona:**</span> — who this expert is and how they think</li>
                   <li><span className="text-primary font-mono">**Cognitive Bias:**</span> — what they systematically underweight</li>
                   <li><span className="text-primary font-mono">**Primary Focus:**</span> — what they hunt for</li>
                   <li><span className="text-primary font-mono">**Severity:**</span> — CRITICAL / HIGH / MEDIUM / LOW</li>
                   <li><span className="text-primary font-mono">**Vectors:**</span> — Human / Technical / Physical / Futures (0–100)</li>
-                  <li><span className="text-primary font-mono">**Tags:**</span> — comma-separated domain tags (used as categories)</li>
+                  <li><span className="text-primary font-mono">**Tags:**</span> — comma-separated keyword search tags</li>
                 </ul>
                 <pre className="text-[10px] font-mono bg-background rounded p-3 overflow-x-auto text-muted-foreground border border-border whitespace-pre-wrap leading-relaxed">
                   {FORMAT_EXAMPLE}
@@ -360,10 +362,16 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                               {agent.severity_default}
                             </span>
                           </div>
+                          {agent._domain_name && (
+                            <div className="flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: tagColor(agent._domain_name) }} />
+                              <span className="text-[10px] font-medium text-foreground">{agent._domain_name}</span>
+                            </div>
+                          )}
                           {agent.persona_description && (
                             <p className="text-xs text-muted-foreground line-clamp-1">{agent.persona_description}</p>
                           )}
-                          {agent.domain_tags?.length > 0 ? (
+                          {agent.domain_tags?.length > 0 && (
                             <div className="flex items-center gap-1 flex-wrap">
                               <Tag className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                               {agent.domain_tags.map(t => {
@@ -376,8 +384,6 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                                 );
                               })}
                             </div>
-                          ) : (
-                            <p className="text-[10px] text-muted-foreground italic">No tags — add **Tags:** to markdown</p>
                           )}
                         </div>
 

@@ -94,9 +94,9 @@ function TagInput({ tags, onChange }) {
   );
 }
 
-export default function AgentForm({ agent, onSave, onCancel, saving }) {
+export default function AgentForm({ agent, domains = [], onSave, onCancel, saving }) {
   const [form, setForm] = useState({
-    name: '', discipline: '', team: 'red', domain_tags: [],
+    name: '', discipline: '', team: 'red', domain_id: '', domain_tags: [],
     persona_description: '', cognitive_bias: '', red_team_focus: '', professional_background: '',
     expertise_level: 'Senior', reasoning_style: 'Analytical', severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
@@ -110,6 +110,7 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
         name:                    a.name                    || '',
         discipline:              a.discipline              || '',
         team:                    a.team                    || 'red',
+        domain_id:               a.domain_id               || '',
         domain_tags:             a.domain_tags             || [],
         persona_description:     a.persona_description     || '',
         cognitive_bias:          a.cognitive_bias          || '',
@@ -188,7 +189,22 @@ export default function AgentForm({ agent, onSave, onCancel, saving }) {
                 </Field>
               </div>
 
-              <Field label="DOMAIN TAGS">
+              {domains.length > 0 && (
+                <Field label="DOMAIN">
+                  <select
+                    value={form.domain_id}
+                    onChange={e => set('domain_id', e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded outline-none bg-muted/50 border border-border text-foreground focus:border-primary/50 transition-colors"
+                  >
+                    <option value="">— No domain —</option>
+                    {domains.map(d => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              <Field label="SEARCH TAGS">
                 <TagInput tags={form.domain_tags} onChange={v => set('domain_tags', v)} />
               </Field>
             </div>
