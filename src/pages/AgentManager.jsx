@@ -11,7 +11,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Plus, Upload, Trash2, CheckSquare, Square, Loader2, Search, Tag, ChevronRight } from 'lucide-react';
+import { Plus, Upload, Trash2, CheckSquare, Square, Loader2, Search, Tag, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AgentCard from '@/components/agents/AgentCard';
 import AgentForm from '@/components/agents/AgentForm';
