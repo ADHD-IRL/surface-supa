@@ -75,16 +75,13 @@ function parseAgentBlock(blockLines) {
   const tagsLine = findAndGet('Tags');
   if (tagsLine) {
     const tags = tagsLine.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-    const KNOWN_DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
-    agent.domain_tags = tags.filter(t => KNOWN_DOMAINS.includes(t));
+    agent.domain_tags = tags;
   }
 
   const domainTagsLine = findAndGet('Domain Tags');
   if (domainTagsLine && !/all domains/i.test(domainTagsLine)) {
     const dTags = domainTagsLine.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean);
-    const KNOWN_DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
-    const mapped = dTags.filter(t => KNOWN_DOMAINS.includes(t));
-    if (mapped.length) agent.domain_tags = [...new Set([...agent.domain_tags, ...mapped])];
+    if (dTags.length) agent.domain_tags = [...new Set([...agent.domain_tags, ...dTags])];
   }
 
   return agent;
