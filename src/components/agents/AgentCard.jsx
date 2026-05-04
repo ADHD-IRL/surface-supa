@@ -1,127 +1,168 @@
 import React from 'react';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Pencil, Trash2, CheckSquare2, Square } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Edit2, Copy, Trash2, CheckSquare2, Square } from 'lucide-react';
 import { resolveAgent } from '@/lib/agentData';
 
-const sevConfig = {
-  CRITICAL: 'bg-red-600 text-white',
-  HIGH:     'bg-orange-500 text-white',
-  MEDIUM:   'bg-amber-400 text-black',
-  LOW:      'bg-green-500 text-white',
-};
-
-function VectorBar({ label, value }) {
-  const pct = Math.min(Math.max(value ?? 0, 0), 100);
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[10px] text-muted-foreground w-12 shrink-0">{label}</span>
-      <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
-        <div className="h-full rounded-full bg-primary/60" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-[10px] font-mono text-muted-foreground w-6 text-right">{pct}</span>
-    </div>
-  );
+// Deterministic color from a tag string
+const PALETTE = ['#F0A500','#2E86AB','#27AE60','#C0392B','#7B2D8B','#E67E22','#16A085','#8E44AD','#1A5276','#B7950B'];
+export function tagColor(tag) {
+  if (!tag) return '#546E7A';
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
 }
 
-export default function AgentCard({ agent: rawAgent, onEdit, onDelete, selectable, selected, onSelect }) {
+const SEV = {
+  CRITICAL: { bg: '#C0392B', text: '#fff' },
+  HIGH:     { bg: '#D68910', text: '#0D1B2A' },
+  MEDIUM:   { bg: '#2E86AB', text: '#fff' },
+  LOW:      { bg: '#27AE60', text: '#fff' },
+};
+
+const VECTORS = [
+  { key: 'vector_human',     label: 'Human',     color: '#C0392B' },
+  { key: 'vector_technical', label: 'Technical', color: '#2E86AB' },
+  { key: 'vector_physical',  label: 'Physical',  color: '#27AE60' },
+  { key: 'vector_futures',   label: 'Futures',   color: '#7B2D8B' },
+];
+
+export default function AgentCard({ agent: rawAgent, onEdit, onDelete, onClone, selectable, selected, onSelect }) {
   const agent = resolveAgent(rawAgent);
-  const hasVectors = agent.vector_human != null || agent.vector_technical != null;
-  const firstSentence = (agent.persona_description || '').split(/[.!?]/)[0].trim();
+  const primaryTag = agent.domain_tags?.[0];
+  const barColor = agent.avatar_color || tagColor(primaryTag);
+  const sev = SEV[agent.severity_default] || SEV.HIGH;
+  const hasVectors = [agent.vector_human, agent.vector_technical, agent.vector_physical, agent.vector_futures]
+    .some(v => v != null);
 
   return (
-    <Card
+    <div
       onClick={selectable ? onSelect : undefined}
-      className={cn(
-        "p-5 bg-card border transition-colors",
-        selectable
-          ? "cursor-pointer select-none"
-          : "hover:border-primary/20",
-        selected
-          ? "border-primary ring-1 ring-primary bg-primary/5"
-          : "border-border"
-      )}
+      className="rounded overflow-hidden transition-all duration-150"
+      style={{
+        backgroundColor: 'hsl(var(--card))',
+        border: `1px solid ${selected ? barColor : 'hsl(var(--border))'}`,
+        boxShadow: selected ? `0 0 0 1px ${barColor}44` : 'none',
+        cursor: selectable ? 'pointer' : 'default',
+      }}
     >
-      <div className="flex items-start justify-between gap-2">
-        {/* Identity */}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-sm truncate">{agent.name}</h3>
-            {agent.is_default && <span className="text-xs text-muted-foreground italic">default</span>}
-          </div>
-          {agent.discipline && (
-            <p className="text-xs text-muted-foreground truncate">{agent.discipline}</p>
-          )}
-          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <Badge variant="outline" className={cn("text-xs px-1.5 py-0",
-              agent.team === 'red'
-                ? "border-red-team/30 text-red-team bg-red-team/5"
-                : "border-blue-team/30 text-blue-team bg-blue-team/5")}>
-              {agent.team}
-            </Badge>
-            {agent.severity_default && (
-              <Badge className={cn("text-xs px-1.5 py-0", sevConfig[agent.severity_default] || sevConfig.HIGH)}>
-                {agent.severity_default}
-              </Badge>
+      {/* Domain color bar */}
+      <div className="h-1" style={{ backgroundColor: barColor }} />
+
+      <div className="p-4">
+        {/* Header row */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h3 className="font-semibold text-sm text-foreground truncate">{agent.name}</h3>
+              {agent.is_default && (
+                <span className="text-[10px] text-muted-foreground italic">default</span>
+              )}
+            </div>
+            {agent.discipline && (
+              <p className="text-xs text-muted-foreground truncate mt-0.5">{agent.discipline}</p>
             )}
-            {agent.expertise_level && (
-              <Badge variant="outline" className="text-xs px-1.5 py-0 text-muted-foreground">
-                {agent.expertise_level}
-              </Badge>
+          </div>
+
+          {/* Badges + selection */}
+          <div className="flex items-center gap-1.5 flex-shrink-0" onClick={selectable ? e => e.stopPropagation() : undefined}>
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded font-bold tracking-wider font-mono"
+              style={{
+                backgroundColor: agent.team === 'red' ? 'rgba(220,38,38,0.12)' : 'rgba(37,99,235,0.12)',
+                color: agent.team === 'red' ? '#DC2626' : '#2563EB',
+                border: `1px solid ${agent.team === 'red' ? 'rgba(220,38,38,0.3)' : 'rgba(37,99,235,0.3)'}`,
+              }}
+            >
+              {agent.team === 'red' ? 'RED' : 'BLUE'}
+            </span>
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded font-bold tracking-wider font-mono"
+              style={{ backgroundColor: sev.bg, color: sev.text }}
+            >
+              {agent.severity_default || 'HIGH'}
+            </span>
+            {selectable && (
+              <button onClick={onSelect} className="ml-0.5">
+                {selected
+                  ? <CheckSquare2 className="w-4 h-4 text-primary" />
+                  : <Square className="w-4 h-4 text-muted-foreground/40" />}
+              </button>
             )}
           </div>
         </div>
 
-        {/* Actions or selection indicator */}
-        <div className="flex gap-1 flex-shrink-0" onClick={e => selectable && e.stopPropagation()}>
-          {selectable ? (
-            selected
-              ? <CheckSquare2 className="w-5 h-5 text-primary" />
-              : <Square className="w-5 h-5 text-muted-foreground/40" />
-          ) : (
-            <>
-              {onEdit && (
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(agent)}>
-                  <Pencil className="w-3.5 h-3.5" />
-                </Button>
-              )}
-              {onDelete && !agent.is_default && (
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(agent)}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              )}
-            </>
-          )}
-        </div>
+        {/* Vector bars */}
+        {hasVectors && (
+          <div className="mt-3 space-y-1.5">
+            {VECTORS.map(({ key, label, color }) => {
+              const val = agent[key] ?? 0;
+              return (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-[10px] w-16 flex-shrink-0 text-muted-foreground font-mono">{label}</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${val}%`, backgroundColor: color }} />
+                  </div>
+                  <span className="text-[10px] w-7 text-right text-muted-foreground font-mono">{val}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Cognitive bias quote */}
+        {agent.cognitive_bias && (
+          <p className="text-xs text-muted-foreground mt-3 italic line-clamp-2">
+            "{agent.cognitive_bias}"
+          </p>
+        )}
+
+        {/* Domain tags */}
+        {agent.domain_tags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-3">
+            {agent.domain_tags.slice(0, 4).map(t => {
+              const c = tagColor(t);
+              return (
+                <span
+                  key={t}
+                  className="text-[10px] px-1.5 py-0.5 rounded capitalize"
+                  style={{ backgroundColor: `${c}18`, color: c, border: `1px solid ${c}33` }}
+                >
+                  {t}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Action footer */}
+        {!selectable && (
+          <div className="flex gap-1 mt-3 pt-3 border-t border-border">
+            {onEdit && (
+              <button
+                onClick={e => { e.stopPropagation(); onEdit(agent); }}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted"
+              >
+                <Edit2 className="w-3 h-3" /> Edit
+              </button>
+            )}
+            {onClone && (
+              <button
+                onClick={e => { e.stopPropagation(); onClone(agent); }}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted"
+              >
+                <Copy className="w-3 h-3" /> Clone
+              </button>
+            )}
+            {onDelete && !agent.is_default && (
+              <button
+                onClick={e => { e.stopPropagation(); onDelete(agent); }}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors text-muted-foreground hover:text-destructive hover:bg-destructive/5 ml-auto"
+              >
+                <Trash2 className="w-3 h-3" /> Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
-
-      {/* Persona snippet */}
-      {firstSentence && (
-        <p className="text-xs text-muted-foreground mt-3 leading-relaxed line-clamp-2">
-          {firstSentence}.
-        </p>
-      )}
-
-      {/* Domain tags */}
-      {agent.domain_tags?.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-3">
-          {agent.domain_tags.map(tag => (
-            <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{tag}</Badge>
-          ))}
-        </div>
-      )}
-
-      {/* Threat vectors */}
-      {hasVectors && (
-        <div className="mt-3 space-y-1 border-t border-border pt-3">
-          <VectorBar label="Human"     value={agent.vector_human} />
-          <VectorBar label="Technical" value={agent.vector_technical} />
-          <VectorBar label="Physical"  value={agent.vector_physical} />
-          <VectorBar label="Futures"   value={agent.vector_futures} />
-        </div>
-      )}
-    </Card>
+    </div>
   );
 }

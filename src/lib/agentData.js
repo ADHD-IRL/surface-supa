@@ -6,7 +6,7 @@
 // individual fields will be present and the JSON fallback is bypassed automatically.
 
 const STRUCTURED_FIELDS = [
-  'discipline',
+  'discipline', 'professional_background',
   'persona_description', 'cognitive_bias', 'red_team_focus',
   'expertise_level', 'reasoning_style', 'severity_default',
   'vector_human', 'vector_technical', 'vector_physical', 'vector_futures',
