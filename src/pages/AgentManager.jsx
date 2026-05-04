@@ -3,6 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -10,23 +11,15 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Plus, Upload, Trash2, CheckSquare, Square, Loader2 } from 'lucide-react';
+import { Plus, Upload, Trash2, CheckSquare, Square, Loader2, Search, Tag, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AgentCard from '@/components/agents/AgentCard';
 import AgentForm from '@/components/agents/AgentForm';
 import AgentImportModal from '@/components/agents/AgentImportModal';
+import { resolveAgent } from '@/lib/agentData';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const EXPERTISE_ORDER = { 'World-Class': 0, Principal: 1, Senior: 2, 'Mid-Level': 3, Junior: 4 };
-const DOMAIN_COLORS = {
-  cyber:        'border-blue-500/30 text-blue-600 bg-blue-50 dark:bg-blue-950/30',
-  geopolitical: 'border-purple-500/30 text-purple-600 bg-purple-50 dark:bg-purple-950/30',
-  financial:    'border-green-500/30 text-green-600 bg-green-50 dark:bg-green-950/30',
-  operational:  'border-amber-500/30 text-amber-600 bg-amber-50 dark:bg-amber-950/30',
-  strategic:    'border-rose-500/30 text-rose-600 bg-rose-50 dark:bg-rose-950/30',
-  untagged:     'border-border text-muted-foreground bg-muted/40',
-};
-const DEFAULT_DOMAIN_COLOR = 'border-slate-400/30 text-slate-600 bg-slate-50 dark:bg-slate-950/30';
 
 export default function AgentManager() {
   const queryClient = useQueryClient();
@@ -37,11 +30,16 @@ export default function AgentManager() {
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState('name');
   const [groupBy, setGroupBy] = useState('team');
+  const [search, setSearch] = useState('');
+  const [filterDomain, setFilterDomain] = useState('');
 
-  const { data: agents = [], isLoading } = useQuery({
+  const { data: rawAgents = [], isLoading } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.list(),
   });
+
+  // Resolve all agents so domain_tags are available even from system_prompt JSON
+  const agents = useMemo(() => rawAgents.map(resolveAgent), [rawAgents]);
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.Agent.create(data),
@@ -121,28 +119,31 @@ export default function AgentManager() {
   const selectAll = () => setSelected(new Set(agents.filter(a => !a.is_default).map(a => a.id)));
   const selectNone = () => setSelected(new Set());
 
-  const sorted = useMemo(() => {
-    return [...agents].sort((a, b) => {
-      if (sortBy === 'name')      return a.name.localeCompare(b.name);
-      if (sortBy === 'severity')  return (SEVERITY_ORDER[a.severity_default] ?? 4) - (SEVERITY_ORDER[b.severity_default] ?? 4);
-      if (sortBy === 'expertise') return (EXPERTISE_ORDER[a.expertise_level] ?? 5) - (EXPERTISE_ORDER[b.expertise_level] ?? 5);
-      return 0;
-    });
-  }, [agents, sortBy]);
-
-  // Stats
-  const redCount  = agents.filter(a => a.team === 'red').length;
-  const blueCount = agents.filter(a => a.team === 'blue').length;
+  // All unique domain tags across agents, sorted
   const allDomains = useMemo(() => {
     const seen = new Set();
     agents.forEach(a => a.domain_tags?.forEach(t => seen.add(t)));
     return [...seen].sort();
   }, [agents]);
-  const domainCounts = useMemo(() => {
-    const counts = {};
-    allDomains.forEach(d => { counts[d] = agents.filter(a => a.domain_tags?.includes(d)).length; });
-    return counts;
-  }, [agents, allDomains]);
+
+  // Filter then sort
+  const filtered = useMemo(() => {
+    return agents.filter(a => {
+      const matchSearch = !search || a.name?.toLowerCase().includes(search.toLowerCase()) || a.discipline?.toLowerCase().includes(search.toLowerCase());
+      const matchDomain = !filterDomain
+        || (filterDomain === '__untagged' ? !a.domain_tags?.length : a.domain_tags?.includes(filterDomain));
+      return matchSearch && matchDomain;
+    });
+  }, [agents, search, filterDomain]);
+
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'name')      return a.name.localeCompare(b.name);
+      if (sortBy === 'severity')  return (SEVERITY_ORDER[a.severity_default] ?? 4) - (SEVERITY_ORDER[b.severity_default] ?? 4);
+      if (sortBy === 'expertise') return (EXPERTISE_ORDER[a.expertise_level] ?? 5) - (EXPERTISE_ORDER[b.expertise_level] ?? 5);
+      return 0;
+    });
+  }, [filtered, sortBy]);
 
   // Grouping
   const groups = useMemo(() => {
@@ -154,7 +155,8 @@ export default function AgentManager() {
     }
     if (groupBy === 'domain') {
       const tagged = new Set();
-      const result = allDomains.map(d => {
+      const domainList = filterDomain ? [filterDomain] : allDomains;
+      const result = domainList.map(d => {
         const items = sorted.filter(a => a.domain_tags?.includes(d));
         items.forEach(a => tagged.add(a.id));
         return { key: d, label: d.charAt(0).toUpperCase() + d.slice(1), items };
@@ -167,25 +169,16 @@ export default function AgentManager() {
         key: s, label: s, items: sorted.filter(a => (a.severity_default || 'HIGH') === s),
       })).filter(g => g.items.length > 0);
     }
-    if (groupBy === 'category') {
-      const cats = [...new Set(sorted.map(a => a.category || ''))].sort((a, b) => {
-        if (!a) return 1;
-        if (!b) return -1;
-        return a.localeCompare(b);
-      });
-      return cats.map(c => ({
-        key: c || '__none',
-        label: c || 'Uncategorized',
-        items: sorted.filter(a => (a.category || '') === c),
-      })).filter(g => g.items.length > 0);
-    }
     return [];
-  }, [sorted, groupBy]);
+  }, [sorted, groupBy, allDomains, filterDomain]);
 
   const deletableSelected = [...selected].filter(id => {
     const a = agents.find(x => x.id === id);
     return a && !a.is_default;
   });
+
+  const redCount  = agents.filter(a => a.team === 'red').length;
+  const blueCount = agents.filter(a => a.team === 'blue').length;
 
   if (isLoading) {
     return (
@@ -196,184 +189,294 @@ export default function AgentManager() {
   }
 
   return (
-    <div className="p-6 lg:p-8 max-w-5xl mx-auto space-y-5">
+    <div className="flex min-h-screen">
 
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      {/* ── Domain sidebar ── */}
+      <aside className="w-52 flex-shrink-0 border-r border-border p-4 space-y-4 sticky top-0 h-screen overflow-y-auto">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search agents…"
+            className="pl-8 h-8 text-xs"
+          />
+        </div>
+
+        {/* Domain tree */}
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {agents.length} total — <span className="text-red-team font-medium">{redCount} red</span> / <span className="text-blue-team font-medium">{blueCount} blue</span>
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap justify-end">
-          <Button
-            variant={bulkMode ? 'secondary' : 'outline'}
-            size="sm"
-            onClick={() => { setBulkMode(b => !b); setSelected(new Set()); }}
-            className="gap-2"
-          >
-            <CheckSquare className="w-4 h-4" />
-            {bulkMode ? 'Cancel' : 'Select'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setShowImport(true); }} className="gap-2">
-            <Upload className="w-4 h-4" /> Import
-          </Button>
-          <Button size="sm" onClick={() => { setShowImport(false); setEditing('new'); setShowForm(true); }} className="gap-2">
-            <Plus className="w-4 h-4" /> Create
-          </Button>
-        </div>
-      </div>
+          <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase mb-2">Domains</p>
+          <div className="space-y-0.5">
+            {/* All */}
+            <button
+              onClick={() => setFilterDomain('')}
+              className={cn(
+                "w-full text-left text-xs px-2 py-1.5 rounded-md flex items-center justify-between transition-colors",
+                !filterDomain
+                  ? "bg-primary/10 text-primary font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              )}
+            >
+              <span>All Domains</span>
+              <span className={cn("text-[10px] font-mono", !filterDomain ? "text-primary" : "text-muted-foreground")}>
+                {agents.length}
+              </span>
+            </button>
 
-      {/* Domain counts bar */}
-      {allDomains.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {allDomains.map(d => (
-            <Badge key={d} variant="outline" className={cn('text-xs px-2 py-0.5 capitalize', DOMAIN_COLORS[d] || DEFAULT_DOMAIN_COLOR)}>
-              {d} <span className="ml-1 font-bold">{domainCounts[d]}</span>
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      {/* Bulk action bar */}
-      {bulkMode && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-muted rounded-lg border border-border">
-          <button onClick={selectAll} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-            <CheckSquare className="w-3.5 h-3.5" /> Select all
-          </button>
-          <button onClick={selectNone} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-            <Square className="w-3.5 h-3.5" /> None
-          </button>
-          <span className="text-xs text-muted-foreground ml-auto">
-            {selected.size} selected
-          </span>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={deletableSelected.length === 0 || bulkDeleteMutation.isPending}
-                className="gap-2 h-7 text-xs"
-              >
-                {bulkDeleteMutation.isPending
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <Trash2 className="w-3.5 h-3.5" />}
-                Delete {deletableSelected.length > 0 ? deletableSelected.length : ''} Agent{deletableSelected.length !== 1 ? 's' : ''}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete {deletableSelected.length} agent{deletableSelected.length !== 1 ? 's' : ''}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This permanently removes the selected agents. Default agents are excluded. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => bulkDeleteMutation.mutate(deletableSelected)}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            {/* Per-domain rows */}
+            {allDomains.map(d => {
+              const count = agents.filter(a => a.domain_tags?.includes(d)).length;
+              const active = filterDomain === d;
+              return (
+                <button
+                  key={d}
+                  onClick={() => setFilterDomain(active ? '' : d)}
+                  className={cn(
+                    "w-full text-left text-xs px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors group",
+                    active
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
                 >
-                  Delete {deletableSelected.length} Agent{deletableSelected.length !== 1 ? 's' : ''}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      )}
+                  <ChevronRight className={cn("w-3 h-3 flex-shrink-0 transition-transform", active && "rotate-90")} />
+                  <span className="flex-1 capitalize truncate">{d}</span>
+                  <span className={cn("text-[10px] font-mono flex-shrink-0", active ? "text-primary" : "text-muted-foreground")}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
 
-      {/* Controls */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Group</span>
-          <Select value={groupBy} onValueChange={setGroupBy}>
-            <SelectTrigger className="h-8 w-32 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="team">Team</SelectItem>
-              <SelectItem value="domain">Domain</SelectItem>
-              <SelectItem value="severity">Severity</SelectItem>
-              <SelectItem value="category">Category</SelectItem>
-            </SelectContent>
-          </Select>
+            {/* Untagged */}
+            {(() => {
+              const count = agents.filter(a => !a.domain_tags?.length).length;
+              if (!count) return null;
+              const active = filterDomain === '__untagged';
+              return (
+                <button
+                  onClick={() => setFilterDomain(active ? '' : '__untagged')}
+                  className={cn(
+                    "w-full text-left text-xs px-2 py-1.5 rounded-md flex items-center gap-2 transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                >
+                  <ChevronRight className={cn("w-3 h-3 flex-shrink-0 transition-transform", active && "rotate-90")} />
+                  <span className="flex-1 italic">Untagged</span>
+                  <span className={cn("text-[10px] font-mono flex-shrink-0", active ? "text-primary" : "text-muted-foreground")}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })()}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Sort</span>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="h-8 w-32 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="severity">Severity</SelectItem>
-              <SelectItem value="expertise">Expertise</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
 
-      {/* Forms */}
-      {showImport && (
-        <AgentImportModal
-          onImport={(agentList) => importMutation.mutate(agentList)}
-          onCancel={() => setShowImport(false)}
-          importing={importMutation.isPending}
-        />
-      )}
-      {showForm && (
-        <div ref={formRef} tabIndex={-1} className="outline-none scroll-mt-6">
-        <AgentForm
-          agent={editing !== 'new' ? editing : null}
-          onSave={handleSave}
-          onCancel={() => { setShowForm(false); setEditing(null); }}
-          saving={createMutation.isPending || updateMutation.isPending}
-        />
-        </div>
-      )}
-
-      {/* Agent groups */}
-      {groups.map(group => (
-        <div key={group.key}>
-          <h2 className={cn(
-            'text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-2',
-            group.labelClass || 'text-muted-foreground'
-          )}>
-            {group.dot && <span className={cn('w-2 h-2 rounded-full', group.dot)} />}
-            {!group.dot && groupBy === 'domain' && (
-              <span className={cn('w-2 h-2 rounded-full border-2', DOMAIN_COLORS[group.key]?.replace(/bg-\S+/, ''))} />
-            )}
-            <span className="capitalize">{group.label}</span>
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal ml-1">
-              {group.items.length}
-            </Badge>
-          </h2>
-          {group.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground pl-4">No agents in this group</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {group.items.map(agent => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  onEdit={bulkMode ? undefined : handleEdit}
-                  onDelete={bulkMode ? undefined : handleDelete}
-                  selectable={bulkMode}
-                  selected={selected.has(agent.id)}
-                  onSelect={() => toggleSelect(agent.id)}
-                />
-              ))}
+        {/* Team counts */}
+        <div className="border-t border-border pt-3">
+          <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase mb-2">Teams</p>
+          <div className="space-y-1 text-xs">
+            <div className="flex items-center justify-between px-2">
+              <span className="text-red-team font-medium">Red</span>
+              <span className="font-mono text-muted-foreground">{redCount}</span>
             </div>
+            <div className="flex items-center justify-between px-2">
+              <span className="text-blue-team font-medium">Blue</span>
+              <span className="font-mono text-muted-foreground">{blueCount}</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <div className="flex-1 p-6 lg:p-8 space-y-5 min-w-0">
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {filterDomain
+                ? <><span className="font-medium text-foreground capitalize">{filterDomain}</span> — {filtered.length} agent{filtered.length !== 1 ? 's' : ''}</>
+                : <>{agents.length} total — <span className="text-red-team font-medium">{redCount} red</span> / <span className="text-blue-team font-medium">{blueCount} blue</span></>
+              }
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end">
+            <Button
+              variant={bulkMode ? 'secondary' : 'outline'}
+              size="sm"
+              onClick={() => { setBulkMode(b => !b); setSelected(new Set()); }}
+              className="gap-2"
+            >
+              <CheckSquare className="w-4 h-4" />
+              {bulkMode ? 'Cancel' : 'Select'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setShowImport(true); }} className="gap-2">
+              <Upload className="w-4 h-4" /> Import
+            </Button>
+            <Button size="sm" onClick={() => { setShowImport(false); setEditing('new'); setShowForm(true); }} className="gap-2">
+              <Plus className="w-4 h-4" /> Create
+            </Button>
+          </div>
+        </div>
+
+        {/* Bulk action bar */}
+        {bulkMode && (
+          <div className="flex items-center gap-3 px-4 py-2.5 bg-muted rounded-lg border border-border">
+            <button onClick={selectAll} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <CheckSquare className="w-3.5 h-3.5" /> Select all
+            </button>
+            <button onClick={selectNone} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <Square className="w-3.5 h-3.5" /> None
+            </button>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {selected.size} selected
+            </span>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={deletableSelected.length === 0 || bulkDeleteMutation.isPending}
+                  className="gap-2 h-7 text-xs"
+                >
+                  {bulkDeleteMutation.isPending
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <Trash2 className="w-3.5 h-3.5" />}
+                  Delete {deletableSelected.length > 0 ? deletableSelected.length : ''} Agent{deletableSelected.length !== 1 ? 's' : ''}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {deletableSelected.length} agent{deletableSelected.length !== 1 ? 's' : ''}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently removes the selected agents. Default agents are excluded. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => bulkDeleteMutation.mutate(deletableSelected)}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete {deletableSelected.length} Agent{deletableSelected.length !== 1 ? 's' : ''}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
+
+        {/* Controls */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Group</span>
+            <Select value={groupBy} onValueChange={setGroupBy}>
+              <SelectTrigger className="h-8 w-32 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="team">Team</SelectItem>
+                <SelectItem value="domain">Domain</SelectItem>
+                <SelectItem value="severity">Severity</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Sort</span>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="h-8 w-32 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Name</SelectItem>
+                <SelectItem value="severity">Severity</SelectItem>
+                <SelectItem value="expertise">Expertise</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {filterDomain && (
+            <button
+              onClick={() => setFilterDomain('')}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground ml-auto"
+            >
+              <Tag className="w-3 h-3" />
+              <span className="capitalize">{filterDomain === '__untagged' ? 'Untagged' : filterDomain}</span>
+              <X className="w-3 h-3" />
+            </button>
           )}
         </div>
-      ))}
 
-      {agents.length === 0 && (
-        <div className="text-center py-16 text-muted-foreground">
-          <p className="text-sm">No agents yet. Import or create your first agent.</p>
-        </div>
-      )}
+        {/* Forms */}
+        {showImport && (
+          <AgentImportModal
+            onImport={(agentList) => importMutation.mutate(agentList)}
+            onCancel={() => setShowImport(false)}
+            importing={importMutation.isPending}
+          />
+        )}
+        {showForm && (
+          <div ref={formRef} tabIndex={-1} className="outline-none scroll-mt-6">
+            <AgentForm
+              agent={editing !== 'new' ? editing : null}
+              onSave={handleSave}
+              onCancel={() => { setShowForm(false); setEditing(null); }}
+              saving={createMutation.isPending || updateMutation.isPending}
+            />
+          </div>
+        )}
+
+        {/* Agent groups */}
+        {groups.map(group => (
+          <div key={group.key}>
+            <h2 className={cn(
+              'text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-2',
+              group.labelClass || 'text-muted-foreground'
+            )}>
+              {group.dot && <span className={cn('w-2 h-2 rounded-full', group.dot)} />}
+              <span className="capitalize">{group.label}</span>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal ml-1">
+                {group.items.length}
+              </Badge>
+            </h2>
+            {group.items.length === 0 ? (
+              <p className="text-sm text-muted-foreground pl-4">No agents in this group</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {group.items.map(agent => (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    onEdit={bulkMode ? undefined : handleEdit}
+                    onDelete={bulkMode ? undefined : handleDelete}
+                    selectable={bulkMode}
+                    selected={selected.has(agent.id)}
+                    onSelect={() => toggleSelect(agent.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {agents.length === 0 && (
+          <div className="text-center py-16 text-muted-foreground">
+            <p className="text-sm">No agents yet. Import or create your first agent.</p>
+          </div>
+        )}
+
+        {agents.length > 0 && filtered.length === 0 && (
+          <div className="text-center py-16 text-muted-foreground">
+            <p className="text-sm">No agents match the current filter.</p>
+            <button onClick={() => { setSearch(''); setFilterDomain(''); }} className="text-xs text-primary mt-2 hover:underline">
+              Clear filters
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
