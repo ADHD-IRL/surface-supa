@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -92,10 +92,20 @@ export default function AgentManager() {
     }
   };
 
+  const formRef = useRef(null);
+
   const handleEdit = (agent) => {
+    setShowImport(false);
     setEditing(agent);
     setShowForm(true);
   };
+
+  useEffect(() => {
+    if (showForm && formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      formRef.current.focus?.();
+    }
+  }, [showForm, editing]);
 
   const handleDelete = (agent) => {
     if (confirm(`Delete agent "${agent.name}"?`)) {
@@ -307,12 +317,14 @@ export default function AgentManager() {
         />
       )}
       {showForm && (
+        <div ref={formRef} tabIndex={-1} className="outline-none scroll-mt-6">
         <AgentForm
           agent={editing !== 'new' ? editing : null}
           onSave={handleSave}
           onCancel={() => { setShowForm(false); setEditing(null); }}
           saving={createMutation.isPending || updateMutation.isPending}
         />
+        </div>
       )}
 
       {/* Agent groups */}
