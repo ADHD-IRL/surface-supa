@@ -10,13 +10,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2 } from 'lucide-react';
+import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2, CheckCircle2, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import DebateRound from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
 import ChainDiagram from '@/components/session/ChainDiagram';
 import MitigationTable from '@/components/session/MitigationTable';
 import MitigationPlaybook from '@/components/session/MitigationPlaybook';
+import DebateRoster from '@/components/session/DebateRoster';
 import ReactMarkdown from 'react-markdown';
 import { buildAgentSystemPrompt } from '@/lib/agentData';
 
@@ -843,14 +844,79 @@ export default function SessionDetail() {
       </div>
 
       {/* Running status */}
-      {runningStep && (
-        <Card className="p-4 bg-primary/5 border-primary/20">
-          <div className="flex items-center gap-3">
-            <Loader2 className="w-4 h-4 animate-spin text-primary" />
-            <span className="text-sm font-medium">{runningStep}</span>
-          </div>
-        </Card>
-      )}
+      {runningStep && (() => {
+        const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
+        const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
+        const pct = Math.round((completedRounds / roundCount) * 100);
+        const activeRound = session.rounds?.find(r => r.status === 'running');
+        const isAnalysis = runningStep.startsWith('Generating');
+        return (
+          <Card className="p-4 bg-primary/5 border-primary/20 space-y-3">
+            {/* Current step */}
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+              <span className="text-sm font-medium">{runningStep}</span>
+            </div>
+
+            {/* Round timeline */}
+            <div className="flex flex-col gap-1.5 pl-7">
+              {Array.from({ length: roundCount }).map((_, i) => {
+                const round  = session.rounds?.[i];
+                const done   = round?.status === 'completed';
+                const active = round?.status === 'running';
+                const redDone = !!round?.red_response;
+                return (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    {done
+                      ? <CheckCircle2 className="w-3.5 h-3.5 text-green-team flex-shrink-0" />
+                      : active
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin text-primary flex-shrink-0" />
+                        : <Circle className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />}
+                    <span className={cn('font-medium', done && 'text-green-team', active && 'text-primary', !done && !active && 'text-muted-foreground')}>
+                      Round {i + 1} of {roundCount}
+                    </span>
+                    {done && round && (
+                      <span className="text-muted-foreground">
+                        — <span className="text-red-team">{round.red_agent_name}</span> vs <span className="text-blue-team">{round.blue_agent_name}</span> · complete
+                      </span>
+                    )}
+                    {active && (
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        — {redDone
+                          ? <><CheckCircle2 className="w-3 h-3 text-red-team inline" /> <span className="text-red-team">{round.red_agent_name}</span> <span className="text-muted-foreground">→</span> <Loader2 className="w-3 h-3 animate-spin text-blue-team inline" /> <span className="text-blue-team">{round.blue_agent_name}</span> responding</>
+                          : <><Loader2 className="w-3 h-3 animate-spin text-red-team inline" /> <span className="text-red-team">{activeRound?.red_agent_name || 'Red'}</span> analyzing</>
+                        }
+                      </span>
+                    )}
+                    {!done && !active && i > 0 && (
+                      <span className="text-muted-foreground">— pending</span>
+                    )}
+                  </div>
+                );
+              })}
+              {isAnalysis && (
+                <div className="flex items-center gap-2 text-xs mt-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary flex-shrink-0" />
+                  <span className="text-primary font-medium">Synthesizing risks, chains & executive summary…</span>
+                </div>
+              )}
+            </div>
+
+            {/* Progress bar */}
+            <div className="pl-7">
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-1000"
+                  style={{ width: `${isAnalysis ? 90 : pct}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground mt-1 block">
+                {isAnalysis ? 'Finalising analysis…' : `${completedRounds} of ${roundCount} rounds complete`}
+              </span>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Content Tabs */}
       <Tabs defaultValue={session.status === 'completed' ? 'report' : 'debate'}>
@@ -868,17 +934,21 @@ export default function SessionDetail() {
           )}
         </TabsList>
 
-        <TabsContent value="debate" className="space-y-6 mt-4">
-          {session.rounds?.length > 0 ? (
-            session.rounds.map((round, i) => (
-              <DebateRound key={i} round={round} index={i} />
-            ))
-          ) : (
+        <TabsContent value="debate" className="space-y-4 mt-4">
+          {/* Roster — always shown */}
+          <DebateRoster session={session} agents={agents} />
+
+          {session.rounds?.length > 0 ? (() => {
+            const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
+            return session.rounds.map((round, i) => (
+              <DebateRound key={i} round={round} index={i} total={roundCount} />
+            ));
+          })() : (
             <Card className="p-12 text-center bg-card">
               <p className="text-muted-foreground">
                 {session.status === 'draft'
                   ? 'Click "Run Analysis" to start the adversarial debate'
-                  : 'Debate rounds will appear here'}
+                  : 'Debate rounds will appear here once the analysis begins'}
               </p>
             </Card>
           )}

@@ -2,7 +2,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import ReactMarkdown from 'react-markdown';
-import { Loader2, Swords } from 'lucide-react';
+import { Loader2, Swords, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function ThinkingDots({ color }) {
@@ -18,12 +18,15 @@ function ThinkingDots({ color }) {
   );
 }
 
-export default function DebateRound({ round, index }) {
+export default function DebateRound({ round, index, total }) {
   if (!round) return null;
 
-  const isRunning = round.status === 'running';
-  const redThinking = isRunning && !round.red_response;
-  const blueThinking = isRunning && !!round.red_response && !round.blue_response;
+  const isRunning   = round.status === 'running';
+  const isCompleted = round.status === 'completed';
+  const redDone     = !!round.red_response;
+  const blueDone    = !!round.blue_response;
+  const redThinking  = isRunning && !redDone;
+  const blueThinking = isRunning && redDone && !blueDone;
 
   const rows = [
     {
@@ -48,16 +51,41 @@ export default function DebateRound({ round, index }) {
     <Card className="overflow-hidden">
       {/* Round header */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-muted/40">
-        <Swords className="w-3.5 h-3.5 text-muted-foreground" />
+        <Swords className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Round {index + 1}
+          Round {index + 1}{total > 1 ? ` of ${total}` : ''}
         </span>
-        {isRunning && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground ml-1" />}
-        {round.timestamp && (
-          <span className="ml-auto text-xs text-muted-foreground">
-            {new Date(round.timestamp).toLocaleTimeString()}
+
+        {/* Agent pills */}
+        <div className="flex items-center gap-1.5 ml-1 flex-wrap">
+          <span className="text-[11px] text-red-team font-medium">
+            {round.red_agent_name || 'Red Agent'}
           </span>
-        )}
+          <span className="text-[10px] text-muted-foreground">vs</span>
+          <span className="text-[11px] text-blue-team font-medium">
+            {round.blue_agent_name || 'Blue Agent'}
+          </span>
+        </div>
+
+        {/* Status */}
+        <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          {isRunning && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-600">
+              {redDone
+                ? <><CheckCircle2 className="w-3 h-3 text-red-team" /><span className="text-red-team">Red</span><span className="text-muted-foreground">→</span><Loader2 className="w-3 h-3 animate-spin text-blue-team" /><span className="text-blue-team">Blue responding…</span></>
+                : <><Loader2 className="w-3 h-3 animate-spin text-red-team" /><span className="text-red-team">Red analyzing…</span></>
+              }
+            </div>
+          )}
+          {isCompleted && (
+            <CheckCircle2 className="w-3.5 h-3.5 text-green-team" />
+          )}
+          {round.timestamp && (
+            <span className="text-xs text-muted-foreground">
+              {new Date(round.timestamp).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Debate table */}
@@ -111,3 +139,4 @@ export default function DebateRound({ round, index }) {
     </Card>
   );
 }
+
