@@ -43,7 +43,10 @@ export default function AgentManager() {
 
   const { data: domains = [], isLoading: domainsLoading } = useQuery({
     queryKey: ['domains'],
-    queryFn: () => base44.entities.Domain.list(),
+    queryFn: () => base44.entities.Domain
+      ? base44.entities.Domain.list()
+      : Promise.resolve([]),
+    retry: false,
   });
 
   const agents = useMemo(() => rawAgents.map(resolveAgent), [rawAgents]);
@@ -103,9 +106,12 @@ export default function AgentManager() {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
+  const domainEntityAvailable = !!base44.entities.Domain;
+
   // Resolve or create a Domain entity by name (case-insensitive).
-  // Returns the domain id.
+  // Returns the domain id, or '' if the Domain entity isn't deployed yet.
   const resolveOrCreateDomain = async (name, currentDomains) => {
+    if (!domainEntityAvailable) return '';
     const norm = name.trim().toLowerCase();
     const existing = currentDomains.find(d => d.name.toLowerCase() === norm);
     if (existing) return existing.id;
@@ -116,15 +122,17 @@ export default function AgentManager() {
 
   const handleImport = async (list) => {
     // Collect unique domain names that need resolving
-    const uniqueDomainNames = [...new Set(
-      list.map(a => a._domain_name).filter(Boolean)
-    )];
+    const uniqueDomainNames = domainEntityAvailable
+      ? [...new Set(list.map(a => a._domain_name).filter(Boolean))]
+      : [];
 
     // Fetch latest domains for accurate matching
     let currentDomains = domains;
-    try {
-      currentDomains = await base44.entities.Domain.list();
-    } catch { /* use cached */ }
+    if (domainEntityAvailable) {
+      try {
+        currentDomains = await base44.entities.Domain.list();
+      } catch { /* use cached */ }
+    }
 
     // Resolve all domains in parallel
     const domainIdMap = {};
