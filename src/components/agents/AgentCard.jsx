@@ -45,40 +45,32 @@ export default function AgentCard({ agent: rawAgent, onEdit, onDelete, selectabl
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        {/* Avatar + identity */}
-        <div className="flex items-start gap-3 min-w-0">
-          <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold flex-shrink-0 text-sm"
-            style={{ backgroundColor: agent.avatar_color || (agent.team === 'red' ? '#DC2626' : '#2563EB') }}
-          >
-            {agent.name.charAt(0)}
+        {/* Identity */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-semibold text-sm truncate">{agent.name}</h3>
+            {agent.is_default && <span className="text-xs text-muted-foreground italic">default</span>}
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-semibold text-sm truncate">{agent.name}</h3>
-              {agent.is_default && <span className="text-xs text-muted-foreground italic">default</span>}
-            </div>
-            {agent.discipline && (
-              <p className="text-xs text-muted-foreground truncate">{agent.discipline}</p>
-            )}
-            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-              <Badge variant="outline" className={cn("text-xs px-1.5 py-0",
-                agent.team === 'red'
-                  ? "border-red-team/30 text-red-team bg-red-team/5"
-                  : "border-blue-team/30 text-blue-team bg-blue-team/5")}>
-                {agent.team}
+          {agent.discipline && (
+            <p className="text-xs text-muted-foreground truncate">{agent.discipline}</p>
+          )}
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <Badge variant="outline" className={cn("text-xs px-1.5 py-0",
+              agent.team === 'red'
+                ? "border-red-team/30 text-red-team bg-red-team/5"
+                : "border-blue-team/30 text-blue-team bg-blue-team/5")}>
+              {agent.team}
+            </Badge>
+            {agent.severity_default && (
+              <Badge className={cn("text-xs px-1.5 py-0", sevConfig[agent.severity_default] || sevConfig.HIGH)}>
+                {agent.severity_default}
               </Badge>
-              {agent.severity_default && (
-                <Badge className={cn("text-xs px-1.5 py-0", sevConfig[agent.severity_default] || sevConfig.HIGH)}>
-                  {agent.severity_default}
-                </Badge>
-              )}
-              {agent.expertise_level && (
-                <Badge variant="outline" className="text-xs px-1.5 py-0 text-muted-foreground">
-                  {agent.expertise_level}
-                </Badge>
-              )}
-            </div>
+            )}
+            {agent.expertise_level && (
+              <Badge variant="outline" className="text-xs px-1.5 py-0 text-muted-foreground">
+                {agent.expertise_level}
+              </Badge>
+            )}
           </div>
         </div>
 
