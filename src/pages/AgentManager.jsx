@@ -18,8 +18,6 @@ import AgentImportModal from '@/components/agents/AgentImportModal';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const EXPERTISE_ORDER = { 'World-Class': 0, Principal: 1, Senior: 2, 'Mid-Level': 3, Junior: 4 };
-const ALL_DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
-
 const DOMAIN_COLORS = {
   cyber:        'border-blue-500/30 text-blue-600 bg-blue-50 dark:bg-blue-950/30',
   geopolitical: 'border-purple-500/30 text-purple-600 bg-purple-50 dark:bg-purple-950/30',
@@ -28,6 +26,7 @@ const DOMAIN_COLORS = {
   strategic:    'border-rose-500/30 text-rose-600 bg-rose-50 dark:bg-rose-950/30',
   untagged:     'border-border text-muted-foreground bg-muted/40',
 };
+const DEFAULT_DOMAIN_COLOR = 'border-slate-400/30 text-slate-600 bg-slate-50 dark:bg-slate-950/30';
 
 export default function AgentManager() {
   const queryClient = useQueryClient();
@@ -134,11 +133,16 @@ export default function AgentManager() {
   // Stats
   const redCount  = agents.filter(a => a.team === 'red').length;
   const blueCount = agents.filter(a => a.team === 'blue').length;
+  const allDomains = useMemo(() => {
+    const seen = new Set();
+    agents.forEach(a => a.domain_tags?.forEach(t => seen.add(t)));
+    return [...seen].sort();
+  }, [agents]);
   const domainCounts = useMemo(() => {
     const counts = {};
-    ALL_DOMAINS.forEach(d => { counts[d] = agents.filter(a => a.domain_tags?.includes(d)).length; });
+    allDomains.forEach(d => { counts[d] = agents.filter(a => a.domain_tags?.includes(d)).length; });
     return counts;
-  }, [agents]);
+  }, [agents, allDomains]);
 
   // Grouping
   const groups = useMemo(() => {
@@ -150,7 +154,7 @@ export default function AgentManager() {
     }
     if (groupBy === 'domain') {
       const tagged = new Set();
-      const result = ALL_DOMAINS.map(d => {
+      const result = allDomains.map(d => {
         const items = sorted.filter(a => a.domain_tags?.includes(d));
         items.forEach(a => tagged.add(a.id));
         return { key: d, label: d.charAt(0).toUpperCase() + d.slice(1), items };
@@ -222,13 +226,15 @@ export default function AgentManager() {
       </div>
 
       {/* Domain counts bar */}
-      <div className="flex flex-wrap gap-2">
-        {ALL_DOMAINS.map(d => domainCounts[d] > 0 && (
-          <Badge key={d} variant="outline" className={cn('text-xs px-2 py-0.5 capitalize', DOMAIN_COLORS[d])}>
-            {d} <span className="ml-1 font-bold">{domainCounts[d]}</span>
-          </Badge>
-        ))}
-      </div>
+      {allDomains.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {allDomains.map(d => (
+            <Badge key={d} variant="outline" className={cn('text-xs px-2 py-0.5 capitalize', DOMAIN_COLORS[d] || DEFAULT_DOMAIN_COLOR)}>
+              {d} <span className="ml-1 font-bold">{domainCounts[d]}</span>
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {/* Bulk action bar */}
       {bulkMode && (
