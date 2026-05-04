@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import heroImage from '@/assets/surface-hero.jpg';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/sessions/new', label: 'New Session', icon: Plus },
   { path: '/agents', label: 'Agents', icon: Bot },
 ];

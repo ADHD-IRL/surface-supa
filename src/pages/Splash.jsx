@@ -44,7 +44,7 @@ export default function Splash() {
                   Start Analysis <ArrowRight className="w-5 h-5" />
                 </Button>
               </Link>
-              <Link to="/">
+              <Link to="/dashboard">
                 <Button size="lg" variant="outline" className="gap-2 text-base">
                   View Dashboard
                 </Button>
