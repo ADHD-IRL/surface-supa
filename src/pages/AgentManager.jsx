@@ -106,6 +106,8 @@ export default function AgentManager() {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
+  const domainEntityAvailable = !!base44.entities.Domain;
+
   // Resolve or create a Domain entity by name (case-insensitive).
   // Returns the domain id.
   const domainEntityAvailable = !!base44.entities.Domain;
