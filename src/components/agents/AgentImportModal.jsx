@@ -1,14 +1,9 @@
-import React, { useState } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText, Tag } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import React, { useState, useRef } from 'react';
+import { X, Upload, CheckCircle2, AlertCircle, Loader2, FileText, ChevronDown, ChevronUp, Tag } from 'lucide-react';
 import { encodeAgentData } from '@/lib/agentData';
+import { tagColor } from '@/components/agents/AgentCard';
 
-// ── Parser (AgentDebate markdown format) ─────────────────────────────────────
+// ── Parser ────────────────────────────────────────────────────────────────────
 
 function getSection(lines, startIdx, label) {
   const sameLine = lines[startIdx].replace(new RegExp(`.*\\*\\*${label}:\\*\\*\\s*`, 'i'), '').trim();
@@ -24,7 +19,8 @@ function getSection(lines, startIdx, label) {
 function parseAgentBlock(blockLines) {
   const agent = {
     name: '', discipline: '', persona_description: '', cognitive_bias: '',
-    red_team_focus: '', severity_default: 'HIGH',
+    red_team_focus: '', professional_background: '',
+    severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
     domain_tags: [], expertise_level: 'Senior', reasoning_style: 'Analytical',
   };
@@ -42,11 +38,11 @@ function parseAgentBlock(blockLines) {
     return idx === -1 ? null : getSection(blockLines, idx, label);
   };
 
-  // Category → treat as a domain tag (categories ARE domains)
+  // **Category:** → domain tag
   const category = findAndGet('Category');
   if (category) {
-    const catTag = category.trim().toLowerCase();
-    if (catTag && !agent.domain_tags.includes(catTag)) agent.domain_tags.push(catTag);
+    const t = category.trim().toLowerCase();
+    if (t && !agent.domain_tags.includes(t)) agent.domain_tags.push(t);
   }
 
   const persona = findAndGet('Persona');
@@ -75,16 +71,18 @@ function parseAgentBlock(blockLines) {
     }
   }
 
+  // **Tags:** → domain tags
   const tagsLine = findAndGet('Tags');
   if (tagsLine) {
-    const tags = tagsLine.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-    tags.forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
+    tagsLine.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+      .forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
   }
 
+  // **Domain Tags:** → domain tags
   const domainTagsLine = findAndGet('Domain Tags');
   if (domainTagsLine && !/all domains/i.test(domainTagsLine)) {
-    const dTags = domainTagsLine.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean);
-    dTags.forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
+    domainTagsLine.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean)
+      .forEach(t => { if (!agent.domain_tags.includes(t)) agent.domain_tags.push(t); });
   }
 
   return agent;
@@ -106,14 +104,9 @@ export function parseAgentMarkdown(text) {
   return blocks.map(parseAgentBlock).filter(a => a.name);
 }
 
-// ── Severity badge ────────────────────────────────────────────────────────────
+// ── Severity colors ───────────────────────────────────────────────────────────
 
-const sevConfig = {
-  CRITICAL: 'bg-red-600 text-white',
-  HIGH:     'bg-orange-500 text-white',
-  MEDIUM:   'bg-amber-400 text-black',
-  LOW:      'bg-green-500 text-white',
-};
+const SEV_COLORS = { CRITICAL: '#C0392B', HIGH: '#D68910', MEDIUM: '#2E86AB', LOW: '#27AE60' };
 
 // ── Format guide ──────────────────────────────────────────────────────────────
 
@@ -142,33 +135,46 @@ const FORMAT_EXAMPLE = `## Agent Name / Discipline
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AgentImportModal({ onImport, onCancel, importing }) {
+  const [mode, setMode] = useState('file');   // 'file' | 'paste'
   const [text, setText] = useState('');
   const [parsed, setParsed] = useState(null);
   const [teamMap, setTeamMap] = useState({});
   const [selected, setSelected] = useState(new Set());
   const [showFormat, setShowFormat] = useState(false);
   const [error, setError] = useState('');
+  const [fileName, setFileName] = useState('');
+  const fileRef = useRef();
 
-  const handleParse = () => {
+  const parseText = (src) => {
     setError('');
-    if (!text.trim()) { setError('Paste some agent markdown first.'); return; }
-    const agents = parseAgentMarkdown(text);
-    if (!agents.length) { setError('No agent blocks found. Check the format guide below.'); return; }
+    const agents = parseAgentMarkdown(src);
+    if (!agents.length) { setError('No agent blocks found — check the format guide.'); return; }
     setParsed(agents);
-    const defaultTeams = {};
-    const defaultSelected = new Set();
-    agents.forEach((_, i) => {
-      defaultTeams[i] = 'red';
-      defaultSelected.add(i);
-    });
-    setTeamMap(defaultTeams);
-    setSelected(defaultSelected);
+    const teams = {};
+    const sel = new Set();
+    agents.forEach((_, i) => { teams[i] = 'red'; sel.add(i); });
+    setTeamMap(teams);
+    setSelected(sel);
+  };
+
+  const handleFiles = (files) => {
+    const file = files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setError('');
+    setParsed(null);
+    const reader = new FileReader();
+    reader.onload = e => parseText(e.target.result);
+    reader.readAsText(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    handleFiles(e.dataTransfer.files);
   };
 
   const toggleSelected = (i) => setSelected(s => {
-    const n = new Set(s);
-    n.has(i) ? n.delete(i) : n.add(i);
-    return n;
+    const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n;
   });
 
   const handleImport = () => {
@@ -176,7 +182,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
       const base = {
         ...parsed[i],
         team: teamMap[i] || 'red',
-        avatar_color: teamMap[i] === 'blue' ? '#2563EB' : '#DC2626',
+        avatar_color: '',
         status: 'active',
       };
       base.system_prompt = encodeAgentData(base);
@@ -186,166 +192,247 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
   };
 
   return (
-    <Card className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold">Import Agents</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Paste AgentDebate markdown — domain tags become the agent's categories</p>
-        </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCancel}>
-          <X className="w-4 h-4" />
-        </Button>
-      </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="w-[640px] max-h-[90vh] overflow-y-auto rounded-lg bg-card border border-border">
 
-      {!parsed ? (
-        <>
-          <Textarea
-            placeholder="## Agent Name / Discipline&#10;&#10;**Persona:** ...&#10;**Cognitive Bias:** ...&#10;**Primary Focus:** ...&#10;**Severity:** HIGH&#10;**Tags:** cyber, supply-chain&#10;..."
-            value={text}
-            onChange={e => { setText(e.target.value); setError(''); }}
-            className="min-h-[220px] resize-y font-mono text-xs"
-          />
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-red-team">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {error}
-            </div>
-          )}
-          <button
-            onClick={() => setShowFormat(f => !f)}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            {showFormat ? 'Hide' : 'Show'} format guide
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-border bg-card">
+          <h2 className="text-xs font-bold tracking-widest font-mono text-primary">IMPORT AGENTS</h2>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
           </button>
-          {showFormat && (
-            <pre className="text-[10px] font-mono bg-muted rounded-lg p-4 overflow-x-auto text-muted-foreground leading-relaxed whitespace-pre-wrap">
-              {FORMAT_EXAMPLE}
-            </pre>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onCancel}>Cancel</Button>
-            <Button onClick={handleParse} disabled={!text.trim()} className="gap-2">
-              <Upload className="w-4 h-4" /> Parse Agents
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground">{parsed.length}</span> agent{parsed.length !== 1 ? 's' : ''} parsed —{' '}
-              <span className="font-semibold text-foreground">{selected.size}</span> selected for import
-            </p>
-            <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => setParsed(null)}>
-              ← Edit markdown
-            </Button>
-          </div>
+        </div>
 
-          {/* Bulk team assignment */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
-            <span className="text-xs text-muted-foreground mr-1">Set all to</span>
+        <div className="p-6 space-y-5">
+
+          {/* Format guide toggle */}
+          <div className="rounded border border-border bg-muted/30">
             <button
-              onClick={() => setTeamMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'red'])))}
-              className="px-3 py-1 rounded text-xs font-medium border border-red-team/30 text-red-team bg-red-team/5 hover:bg-red-team/15 transition-colors"
+              onClick={() => setShowFormat(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 text-xs font-bold tracking-widest font-mono text-muted-foreground"
             >
-              Red Team
+              <span className="flex items-center gap-2">
+                <FileText className="w-3.5 h-3.5 text-primary" />
+                MARKDOWN FORMAT GUIDE
+              </span>
+              {showFormat ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
-            <button
-              onClick={() => setTeamMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'blue'])))}
-              className="px-3 py-1 rounded text-xs font-medium border border-blue-team/30 text-blue-team bg-blue-team/5 hover:bg-blue-team/15 transition-colors"
-            >
-              Blue Team
-            </button>
-          </div>
-
-          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-            {parsed.map((agent, i) => (
-              <div
-                key={i}
-                onClick={() => toggleSelected(i)}
-                className={cn(
-                  "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
-                  selected.has(i)
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/30 opacity-60"
-                )}
-              >
-                <CheckCircle2 className={cn("w-4 h-4 mt-0.5 flex-shrink-0 transition-colors",
-                  selected.has(i) ? "text-primary" : "text-muted-foreground/40")} />
-
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold">{agent.name}</span>
-                    {agent.discipline !== agent.name && (
-                      <span className="text-xs text-muted-foreground">{agent.discipline}</span>
-                    )}
-                    <Badge className={cn("text-xs px-1.5 py-0", sevConfig[agent.severity_default] || sevConfig.HIGH)}>
-                      {agent.severity_default}
-                    </Badge>
-                  </div>
-                  {agent.persona_description && (
-                    <p className="text-xs text-muted-foreground line-clamp-1">{agent.persona_description}</p>
-                  )}
-                  {/* Domain tags = categories */}
-                  {agent.domain_tags?.length > 0 ? (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <Tag className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                      {agent.domain_tags.map(t => (
-                        <Badge key={t} variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{t}</Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground italic">No domain tags — add **Tags:** to markdown</p>
-                  )}
-                </div>
-
-                {/* Team picker per agent */}
-                <div onClick={e => e.stopPropagation()} className="flex-shrink-0">
-                  <Select
-                    value={teamMap[i] || 'red'}
-                    onValueChange={v => setTeamMap(m => ({ ...m, [i]: v }))}
-                  >
-                    <SelectTrigger className="h-7 w-28 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="red">
-                        <span className="text-red-team font-medium">Red Team</span>
-                      </SelectItem>
-                      <SelectItem value="blue">
-                        <span className="text-blue-team font-medium">Blue Team</span>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            {showFormat && (
+              <div className="px-4 pb-4 border-t border-border space-y-3">
+                <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
+                  <li><span className="text-primary font-mono">## Agent Name</span> — H2 heading starts each agent (required)</li>
+                  <li><span className="text-primary font-mono">**Persona:**</span> — who this expert is and how they think</li>
+                  <li><span className="text-primary font-mono">**Cognitive Bias:**</span> — what they systematically underweight</li>
+                  <li><span className="text-primary font-mono">**Primary Focus:**</span> — what they hunt for</li>
+                  <li><span className="text-primary font-mono">**Severity:**</span> — CRITICAL / HIGH / MEDIUM / LOW</li>
+                  <li><span className="text-primary font-mono">**Vectors:**</span> — Human / Technical / Physical / Futures (0–100)</li>
+                  <li><span className="text-primary font-mono">**Tags:**</span> — comma-separated domain tags (used as categories)</li>
+                </ul>
+                <pre className="text-[10px] font-mono bg-background rounded p-3 overflow-x-auto text-muted-foreground border border-border whitespace-pre-wrap leading-relaxed">
+                  {FORMAT_EXAMPLE}
+                </pre>
               </div>
-            ))}
+            )}
           </div>
 
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex gap-2">
-              <Button variant="ghost" size="sm" className="text-xs h-7"
-                onClick={() => setSelected(new Set(parsed.map((_, i) => i)))}>
-                Select all
-              </Button>
-              <Button variant="ghost" size="sm" className="text-xs h-7"
-                onClick={() => setSelected(new Set())}>
-                Deselect all
-              </Button>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={onCancel}>Cancel</Button>
-              <Button onClick={handleImport} disabled={selected.size === 0 || importing} className="gap-2">
-                {importing
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <Upload className="w-4 h-4" />}
-                Import {selected.size > 0 ? `${selected.size} ` : ''}Agent{selected.size !== 1 ? 's' : ''}
-              </Button>
-            </div>
+          {!parsed ? (
+            <>
+              {/* Mode toggle */}
+              <div className="flex rounded overflow-hidden border border-border w-fit">
+                {[['file', 'Drop File'], ['paste', 'Paste Text']].map(([m, label]) => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className="px-4 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: mode === m ? 'hsl(var(--primary))' : 'transparent',
+                      color: mode === m ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
+                    }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {mode === 'file' ? (
+                /* File drop zone */
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={e => e.preventDefault()}
+                  onClick={() => fileRef.current.click()}
+                  className="rounded border-2 border-dashed border-border hover:border-primary/40 flex flex-col items-center justify-center py-12 cursor-pointer transition-colors"
+                >
+                  <Upload className="w-8 h-8 mb-3 text-muted-foreground" />
+                  {fileName ? (
+                    <p className="text-sm font-medium text-primary">{fileName} — click to replace</p>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-foreground">Drop a .md file here or click to browse</p>
+                      <p className="text-xs text-muted-foreground mt-1">One file containing one or more agents</p>
+                    </>
+                  )}
+                  <input ref={fileRef} type="file" accept=".md,.txt" className="hidden"
+                    onChange={e => handleFiles(e.target.files)} />
+                </div>
+              ) : (
+                /* Paste textarea */
+                <textarea
+                  value={text}
+                  onChange={e => { setText(e.target.value); setError(''); }}
+                  placeholder="## Agent Name / Discipline&#10;&#10;**Persona:** ...&#10;**Tags:** cyber, supply-chain&#10;..."
+                  className="w-full min-h-[200px] px-3 py-2 text-xs font-mono rounded border border-border bg-muted/30 text-foreground placeholder:text-muted-foreground resize-y outline-none focus:border-primary/50"
+                />
+              )}
+
+              {error && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button onClick={onCancel} className="px-4 py-2 text-sm rounded border border-border text-muted-foreground hover:text-foreground transition-colors">
+                  Cancel
+                </button>
+                {mode === 'paste' && (
+                  <button onClick={() => parseText(text)} disabled={!text.trim()}
+                    className="flex items-center gap-2 px-4 py-2 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+                    <Upload className="w-4 h-4" /> Parse Agents
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Parsed preview */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold text-foreground">{parsed.length}</span> agent{parsed.length !== 1 ? 's' : ''} parsed —{' '}
+                  <span className="font-semibold text-foreground">{selected.size}</span> selected
+                </p>
+                <button onClick={() => { setParsed(null); setFileName(''); setText(''); }}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                  ← Edit
+                </button>
+              </div>
+
+              {/* Bulk team selector */}
+              <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 rounded border border-border">
+                <span className="text-xs text-muted-foreground mr-1">Set all to</span>
+                <button onClick={() => setTeamMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'red'])))}
+                  className="px-3 py-1 rounded text-xs font-bold font-mono border border-red-500/30 text-red-600 bg-red-500/5 hover:bg-red-500/15 transition-colors">
+                  RED TEAM
+                </button>
+                <button onClick={() => setTeamMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'blue'])))}
+                  className="px-3 py-1 rounded text-xs font-bold font-mono border border-blue-500/30 text-blue-600 bg-blue-500/5 hover:bg-blue-500/15 transition-colors">
+                  BLUE TEAM
+                </button>
+              </div>
+
+              {/* Agent list */}
+              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                {parsed.map((agent, i) => {
+                  const isSelected = selected.has(i);
+                  const primaryTag = agent.domain_tags?.[0];
+                  const barColor = tagColor(primaryTag);
+                  const sevColor = SEV_COLORS[agent.severity_default] || SEV_COLORS.HIGH;
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => toggleSelected(i)}
+                      className="rounded overflow-hidden cursor-pointer transition-all"
+                      style={{
+                        border: `1px solid ${isSelected ? barColor : 'hsl(var(--border))'}`,
+                        backgroundColor: isSelected ? `${barColor}08` : 'hsl(var(--card))',
+                        opacity: isSelected ? 1 : 0.6,
+                      }}
+                    >
+                      <div className="h-0.5" style={{ backgroundColor: barColor }} />
+                      <div className="flex items-start gap-3 p-3">
+                        <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0 transition-colors"
+                          style={{ color: isSelected ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground)/0.4)' }} />
+
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-foreground">{agent.name}</span>
+                            {agent.discipline !== agent.name && (
+                              <span className="text-xs text-muted-foreground">{agent.discipline}</span>
+                            )}
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold font-mono"
+                              style={{ backgroundColor: `${sevColor}22`, color: sevColor }}>
+                              {agent.severity_default}
+                            </span>
+                          </div>
+                          {agent.persona_description && (
+                            <p className="text-xs text-muted-foreground line-clamp-1">{agent.persona_description}</p>
+                          )}
+                          {agent.domain_tags?.length > 0 ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <Tag className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                              {agent.domain_tags.map(t => {
+                                const c = tagColor(t);
+                                return (
+                                  <span key={t} className="text-[10px] px-1.5 py-0.5 rounded capitalize"
+                                    style={{ backgroundColor: `${c}18`, color: c, border: `1px solid ${c}33` }}>
+                                    {t}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-muted-foreground italic">No tags — add **Tags:** to markdown</p>
+                          )}
+                        </div>
+
+                        {/* Team picker */}
+                        <div onClick={e => e.stopPropagation()} className="flex-shrink-0">
+                          <div className="flex rounded overflow-hidden border border-border">
+                            {['red', 'blue'].map(t => (
+                              <button key={t} onClick={() => setTeamMap(m => ({ ...m, [i]: t }))}
+                                className="px-2 py-1 text-[10px] font-bold font-mono transition-colors"
+                                style={{
+                                  backgroundColor: teamMap[i] === t
+                                    ? (t === 'red' ? 'rgba(220,38,38,0.15)' : 'rgba(37,99,235,0.15)')
+                                    : 'transparent',
+                                  color: teamMap[i] === t
+                                    ? (t === 'red' ? '#DC2626' : '#2563EB')
+                                    : 'hsl(var(--muted-foreground))',
+                                }}>
+                                {t.toUpperCase()}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Select all / none */}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <button onClick={() => setSelected(new Set(parsed.map((_, i) => i)))} className="hover:text-foreground transition-colors">Select all</button>
+                <span>·</span>
+                <button onClick={() => setSelected(new Set())} className="hover:text-foreground transition-colors">Deselect all</button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {parsed && (
+          <div className="sticky bottom-0 flex justify-end gap-2 px-6 py-4 border-t border-border bg-card">
+            <button onClick={onCancel} className="px-4 py-2 text-sm rounded border border-border text-muted-foreground hover:text-foreground transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={selected.size === 0 || importing}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              Import {selected.size > 0 ? `${selected.size} ` : ''}Agent{selected.size !== 1 ? 's' : ''}
+            </button>
           </div>
-        </>
-      )}
-    </Card>
+        )}
+      </div>
+    </div>
   );
 }

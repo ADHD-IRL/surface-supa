@@ -1,97 +1,90 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Save, Plus } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { X, SlidersHorizontal, Save } from 'lucide-react';
 import { resolveAgent, encodeAgentData } from '@/lib/agentData';
 
-const COMMON_DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
+const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+const SEV_COLORS = { CRITICAL: '#C0392B', HIGH: '#D68910', MEDIUM: '#2E86AB', LOW: '#27AE60' };
 const EXPERTISE_LEVELS = ['Junior', 'Mid-Level', 'Senior', 'Principal', 'World-Class'];
 const REASONING_STYLES = ['Analytical', 'Intuitive', 'Contrarian', 'Systematic', 'Probabilistic'];
-const SEVERITY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const COLORS = ['#DC2626','#B91C1C','#991B1B','#2563EB','#1D4ED8','#1E40AF','#059669','#7C3AED','#D97706','#64748B'];
+const COMMON_DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
 
-function VectorSlider({ label, value, onChange }) {
+function Field({ label, children }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="text-xs font-mono font-semibold w-8 text-right">{value}</span>
-      </div>
-      <input
-        type="range" min={0} max={100} value={value}
-        onChange={e => onChange(Number(e.target.value))}
-        className="w-full h-1.5 rounded-full accent-primary cursor-pointer"
-      />
+    <div>
+      <label className="block text-xs font-bold tracking-widest mb-1.5 font-mono text-muted-foreground">{label}</label>
+      {children}
     </div>
   );
 }
 
-function DomainTagInput({ tags, onChange }) {
-  const [input, setInput] = useState('');
-  const inputRef = useRef(null);
+function TextInput({ value, onChange, placeholder, className = '' }) {
+  return (
+    <input
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className={`w-full px-3 py-2 text-sm rounded outline-none bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground focus:border-primary/50 transition-colors ${className}`}
+    />
+  );
+}
 
-  const addTag = (raw) => {
-    const tag = raw.trim().toLowerCase();
-    if (!tag || tags.includes(tag)) return;
-    onChange([...tags, tag]);
+function TextArea({ value, onChange, placeholder, rows = 3 }) {
+  return (
+    <textarea
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      className="w-full px-3 py-2 text-sm rounded outline-none bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground focus:border-primary/50 transition-colors resize-y"
+    />
+  );
+}
+
+function TagInput({ tags, onChange }) {
+  const [input, setInput] = useState('');
+
+  const add = (raw) => {
+    const t = raw.trim().toLowerCase();
+    if (t && !tags.includes(t)) onChange([...tags, t]);
     setInput('');
   };
 
-  const removeTag = (t) => onChange(tags.filter(x => x !== t));
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      addTag(input);
-    } else if (e.key === 'Backspace' && !input && tags.length) {
-      removeTag(tags[tags.length - 1]);
-    }
-  };
+  const remove = (t) => onChange(tags.filter(x => x !== t));
 
   return (
     <div className="space-y-2">
-      {/* Existing tag chips */}
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {tags.map(t => (
-            <Badge key={t} variant="secondary" className="text-xs px-2 py-0.5 gap-1 capitalize">
+            <span key={t} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-muted border border-border text-foreground capitalize">
               {t}
-              <button onClick={() => removeTag(t)} className="ml-0.5 hover:text-destructive">
-                <X className="w-2.5 h-2.5" />
-              </button>
-            </Badge>
+              <button onClick={() => remove(t)} className="text-muted-foreground hover:text-destructive ml-0.5">×</button>
+            </span>
           ))}
         </div>
       )}
-
-      {/* Free-text input */}
       <div className="flex gap-2">
-        <Input
-          ref={inputRef}
+        <input
           value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a domain tag and press Enter…"
-          className="text-xs h-8"
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(input); } }}
+          placeholder="Type a tag and press Enter…"
+          className="flex-1 px-3 py-1.5 text-xs rounded outline-none bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground focus:border-primary/50 transition-colors"
         />
-        <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => addTag(input)} disabled={!input.trim()}>
-          <Plus className="w-3.5 h-3.5" />
-        </Button>
+        <button
+          onClick={() => add(input)}
+          disabled={!input.trim()}
+          className="px-3 py-1.5 text-xs rounded bg-muted border border-border text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+        >
+          Add
+        </button>
       </div>
-
-      {/* Common domain quick-add */}
       <div className="flex flex-wrap gap-1.5">
         {COMMON_DOMAINS.filter(d => !tags.includes(d)).map(d => (
           <button
             key={d}
-            onClick={() => addTag(d)}
-            className="px-2 py-0.5 rounded text-[11px] font-medium capitalize border border-dashed border-border text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+            onClick={() => add(d)}
+            className="text-[11px] px-2 py-0.5 rounded border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors capitalize"
           >
             + {d}
           </button>
@@ -104,173 +97,238 @@ function DomainTagInput({ tags, onChange }) {
 export default function AgentForm({ agent, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     name: '', discipline: '', team: 'red', domain_tags: [],
+    persona_description: '', cognitive_bias: '', red_team_focus: '', professional_background: '',
     expertise_level: 'Senior', reasoning_style: 'Analytical', severity_default: 'HIGH',
-    persona_description: '', cognitive_bias: '', red_team_focus: '',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
-    avatar_color: '#DC2626', status: 'active',
+    avatar_color: '', status: 'active',
   });
 
   useEffect(() => {
     if (agent) {
       const a = resolveAgent(agent);
       setForm({
-        name:                a.name                || '',
-        discipline:          a.discipline          || '',
-        team:                a.team                || 'red',
-        domain_tags:         a.domain_tags         || [],
-        expertise_level:     a.expertise_level     || 'Senior',
-        reasoning_style:     a.reasoning_style     || 'Analytical',
-        severity_default:    a.severity_default    || 'HIGH',
-        persona_description: a.persona_description || '',
-        cognitive_bias:      a.cognitive_bias      || '',
-        red_team_focus:      a.red_team_focus      || '',
-        vector_human:        a.vector_human        ?? 50,
-        vector_technical:    a.vector_technical    ?? 50,
-        vector_physical:     a.vector_physical     ?? 30,
-        vector_futures:      a.vector_futures      ?? 40,
-        avatar_color:        a.avatar_color        || '#DC2626',
-        status:              a.status              || 'active',
+        name:                    a.name                    || '',
+        discipline:              a.discipline              || '',
+        team:                    a.team                    || 'red',
+        domain_tags:             a.domain_tags             || [],
+        persona_description:     a.persona_description     || '',
+        cognitive_bias:          a.cognitive_bias          || '',
+        red_team_focus:          a.red_team_focus          || '',
+        professional_background: a.professional_background || '',
+        expertise_level:         a.expertise_level         || 'Senior',
+        reasoning_style:         a.reasoning_style         || 'Analytical',
+        severity_default:        a.severity_default        || 'HIGH',
+        vector_human:            a.vector_human            ?? 50,
+        vector_technical:        a.vector_technical        ?? 50,
+        vector_physical:         a.vector_physical         ?? 30,
+        vector_futures:          a.vector_futures          ?? 40,
+        avatar_color:            a.avatar_color            || '',
+        status:                  a.status                  || 'active',
       });
     }
   }, [agent]);
 
-  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
-  const sevColor = { LOW: 'text-green-600', MEDIUM: 'text-amber-600', HIGH: 'text-orange-600', CRITICAL: 'text-red-600' };
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = () => {
+    onSave({ ...form, system_prompt: encodeAgentData(form) });
+  };
 
   return (
-    <Card className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">{agent ? 'Edit Agent' : 'Create Agent'}</h3>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCancel}>
-          <X className="w-4 h-4" />
-        </Button>
-      </div>
+    // Modal overlay
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="w-[680px] max-h-[92vh] overflow-y-auto rounded-lg bg-card border border-border">
 
-      {/* Identity */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Name</Label>
-          <Input placeholder="e.g. Supply Chain Threat Analyst" value={form.name} onChange={e => set('name', e.target.value)} />
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-border bg-card">
+          <h2 className="text-xs font-bold tracking-widest font-mono text-primary">
+            {agent?.id ? 'EDIT AGENT' : 'NEW AGENT'}
+          </h2>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Discipline</Label>
-          <Input placeholder="e.g. SCRM / Hardware Security" value={form.discipline} onChange={e => set('discipline', e.target.value)} />
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Team</Label>
-          <Select value={form.team} onValueChange={v => set('team', v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="red">Red Team — Attacker</SelectItem>
-              <SelectItem value="blue">Blue Team — Defender</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Expertise Level</Label>
-          <Select value={form.expertise_level} onValueChange={v => set('expertise_level', v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {EXPERTISE_LEVELS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Reasoning Style</Label>
-          <Select value={form.reasoning_style} onValueChange={v => set('reasoning_style', v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {REASONING_STYLES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+        <div className="p-6 space-y-6">
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Default Severity</Label>
-          <Select value={form.severity_default} onValueChange={v => set('severity_default', v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {SEVERITY_LEVELS.map(s => (
-                <SelectItem key={s} value={s}><span className={sevColor[s]}>{s}</span></SelectItem>
+          {/* ── Identity ── */}
+          <div>
+            <p className="text-[10px] font-bold tracking-widest font-mono text-muted-foreground mb-3">AGENT IDENTITY</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Field label="NAME">
+                    <TextInput value={form.name} onChange={v => set('name', v)} placeholder="e.g. Supply Chain Threat Analyst" />
+                  </Field>
+                </div>
+                <Field label="DISCIPLINE">
+                  <TextInput value={form.discipline} onChange={v => set('discipline', v)} placeholder="e.g. SCRM / Hardware Security" />
+                </Field>
+                <Field label="TEAM">
+                  <div className="flex gap-2">
+                    {['red', 'blue'].map(t => (
+                      <button
+                        key={t}
+                        onClick={() => set('team', t)}
+                        className="flex-1 py-2 text-xs font-bold font-mono rounded capitalize transition-all"
+                        style={{
+                          backgroundColor: form.team === t
+                            ? (t === 'red' ? 'rgba(220,38,38,0.15)' : 'rgba(37,99,235,0.15)')
+                            : 'hsl(var(--muted)/0.5)',
+                          color: form.team === t
+                            ? (t === 'red' ? '#DC2626' : '#2563EB')
+                            : 'hsl(var(--muted-foreground))',
+                          border: `1px solid ${form.team === t ? (t === 'red' ? 'rgba(220,38,38,0.4)' : 'rgba(37,99,235,0.4)') : 'hsl(var(--border))'}`,
+                        }}
+                      >
+                        {t} Team
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+
+              <Field label="DOMAIN TAGS">
+                <TagInput tags={form.domain_tags} onChange={v => set('domain_tags', v)} />
+              </Field>
+            </div>
+          </div>
+
+          {/* ── Profile ── */}
+          <div>
+            <p className="text-[10px] font-bold tracking-widest font-mono text-muted-foreground mb-3">PROFILE</p>
+            <div className="space-y-3">
+              <Field label="PERSONA DESCRIPTION">
+                <TextArea value={form.persona_description} onChange={v => set('persona_description', v)}
+                  placeholder="Who is this expert, how do they think, what have they seen…" rows={3} />
+              </Field>
+              <Field label="COGNITIVE BIAS">
+                <TextArea value={form.cognitive_bias} onChange={v => set('cognitive_bias', v)}
+                  placeholder="What this expert systematically underweights or misses…" rows={2} />
+              </Field>
+              <Field label={form.team === 'red' ? 'RED TEAM FOCUS' : 'BLUE TEAM FOCUS'}>
+                <TextArea value={form.red_team_focus} onChange={v => set('red_team_focus', v)}
+                  placeholder={form.team === 'red' ? 'What this agent hunts for in any scenario…' : 'What defenses and countermeasures this agent champions…'}
+                  rows={2} />
+              </Field>
+            </div>
+          </div>
+
+          {/* ── Persona Tuning ── */}
+          <div className="rounded-lg p-4 bg-muted/30 border border-border">
+            <div className="flex items-center gap-2 mb-3">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-primary" />
+              <p className="text-[10px] font-bold tracking-widest font-mono text-primary">PERSONA TUNING</p>
+              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-primary/10 text-primary border border-primary/20">influences LLM output</span>
+            </div>
+            <div className="space-y-3">
+              <Field label="PROFESSIONAL BACKGROUND">
+                <TextArea value={form.professional_background} onChange={v => set('professional_background', v)}
+                  placeholder="e.g. 15 years at NSA, then private sector threat intelligence. Led post-9/11 HUMINT reforms…"
+                  rows={2} />
+              </Field>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold tracking-widest font-mono text-muted-foreground mb-2">EXPERTISE LEVEL</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {EXPERTISE_LEVELS.map(lvl => (
+                      <button key={lvl} onClick={() => set('expertise_level', lvl)}
+                        className="px-2 py-1 rounded text-xs font-medium transition-all"
+                        style={{
+                          backgroundColor: form.expertise_level === lvl ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
+                          color: form.expertise_level === lvl ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
+                          border: `1px solid ${form.expertise_level === lvl ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`,
+                        }}>
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold tracking-widest font-mono text-muted-foreground mb-2">REASONING STYLE</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {REASONING_STYLES.map(s => (
+                      <button key={s} onClick={() => set('reasoning_style', s)}
+                        className="px-2 py-1 rounded text-xs font-medium transition-all"
+                        style={{
+                          backgroundColor: form.reasoning_style === s ? '#2E86AB' : 'hsl(var(--muted))',
+                          color: form.reasoning_style === s ? '#fff' : 'hsl(var(--muted-foreground))',
+                          border: `1px solid ${form.reasoning_style === s ? '#2E86AB' : 'hsl(var(--border))'}`,
+                        }}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Vector Weights ── */}
+          <div>
+            <p className="text-[10px] font-bold tracking-widest font-mono text-muted-foreground mb-3">VECTOR WEIGHTS</p>
+            <div className="space-y-3">
+              {[
+                { k: 'vector_human',     label: 'Human',     color: '#C0392B' },
+                { k: 'vector_technical', label: 'Technical', color: '#2E86AB' },
+                { k: 'vector_physical',  label: 'Physical',  color: '#27AE60' },
+                { k: 'vector_futures',   label: 'Futures',   color: '#7B2D8B' },
+              ].map(({ k, label, color }) => (
+                <div key={k} className="flex items-center gap-3">
+                  <span className="text-xs w-20 flex-shrink-0 text-muted-foreground">{label}</span>
+                  <input
+                    type="range" min={0} max={100} value={form[k] || 0}
+                    onChange={e => set(k, parseInt(e.target.value))}
+                    className="flex-1 h-1.5 rounded cursor-pointer"
+                    style={{ accentColor: color }}
+                  />
+                  <input
+                    type="number" min={0} max={100} value={form[k] || 0}
+                    onChange={e => set(k, parseInt(e.target.value) || 0)}
+                    className="w-12 px-2 py-1 text-xs text-center rounded outline-none bg-muted/50 border border-border text-foreground"
+                  />
+                </div>
               ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Avatar Color</Label>
-          <div className="flex gap-2 pt-1.5">
-            {COLORS.map(color => (
-              <button key={color} onClick={() => set('avatar_color', color)}
-                className={cn("w-6 h-6 rounded-full transition-transform", form.avatar_color === color && "ring-2 ring-offset-2 ring-primary scale-110")}
-                style={{ backgroundColor: color }} />
-            ))}
+            </div>
+          </div>
+
+          {/* ── Default Severity ── */}
+          <div>
+            <p className="text-[10px] font-bold tracking-widest font-mono text-muted-foreground mb-3">DEFAULT SEVERITY</p>
+            <div className="flex gap-2">
+              {SEVERITIES.map(s => (
+                <button key={s} onClick={() => set('severity_default', s)}
+                  className="flex-1 py-2 text-xs font-bold font-mono rounded transition-all"
+                  style={{
+                    backgroundColor: form.severity_default === s ? SEV_COLORS[s] : `${SEV_COLORS[s]}22`,
+                    color: form.severity_default === s
+                      ? (s === 'HIGH' ? '#0D1B2A' : '#fff')
+                      : SEV_COLORS[s],
+                  }}>
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Domain Tags */}
-      <div className="space-y-2">
-        <Label className="text-xs font-semibold">Domain Tags</Label>
-        <p className="text-xs text-muted-foreground -mt-1">Tags define the agent's category — used to group and filter agents.</p>
-        <DomainTagInput
-          tags={form.domain_tags}
-          onChange={tags => set('domain_tags', tags)}
-        />
-      </div>
-
-      {/* Persona section */}
-      <div className="border-t border-border pt-4 space-y-4">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Persona</p>
-
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Persona Description</Label>
-          <Textarea placeholder="3–4 sentences: career history, expertise, worldview..."
-            value={form.persona_description} onChange={e => set('persona_description', e.target.value)}
-            className="min-h-[80px] resize-y text-sm" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">Cognitive Bias</Label>
-          <Textarea placeholder="What does this agent systematically underweight or miss?"
-            value={form.cognitive_bias} onChange={e => set('cognitive_bias', e.target.value)}
-            className="min-h-[60px] resize-y text-sm" />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold">
-            {form.team === 'red' ? 'Red Team Focus' : 'Blue Team Focus'}
-          </Label>
-          <Textarea
-            placeholder={form.team === 'red'
-              ? "What threats and attack paths does this agent hunt for?"
-              : "What defenses and detection methods does this agent champion?"}
-            value={form.red_team_focus} onChange={e => set('red_team_focus', e.target.value)}
-            className="min-h-[60px] resize-y text-sm" />
+        {/* Footer */}
+        <div className="sticky bottom-0 flex justify-end gap-2 px-6 py-4 border-t border-border bg-card">
+          <button onClick={onCancel} className="px-4 py-2 text-sm rounded border border-border text-muted-foreground hover:text-foreground transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!form.name || saving}
+            className="flex items-center gap-2 px-4 py-2 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving
+              ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : <Save className="w-4 h-4" />}
+            {agent?.id ? 'Update Agent' : 'Create Agent'}
+          </button>
         </div>
       </div>
-
-      {/* Threat vectors */}
-      <div className="border-t border-border pt-4 space-y-3">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Threat Vector Weights</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-          <VectorSlider label="Human"     value={form.vector_human}     onChange={v => set('vector_human', v)} />
-          <VectorSlider label="Technical" value={form.vector_technical} onChange={v => set('vector_technical', v)} />
-          <VectorSlider label="Physical"  value={form.vector_physical}  onChange={v => set('vector_physical', v)} />
-          <VectorSlider label="Futures"   value={form.vector_futures}   onChange={v => set('vector_futures', v)} />
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button onClick={() => onSave({ ...form, system_prompt: encodeAgentData(form) })} disabled={!form.name || saving} className="gap-2">
-          {saving
-            ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            : <><Save className="w-4 h-4" /> {agent ? 'Update' : 'Create'} Agent</>}
-        </Button>
-      </div>
-    </Card>
+    </div>
   );
 }
