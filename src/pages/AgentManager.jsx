@@ -36,22 +36,22 @@ export default function AgentManager() {
     queryFn: () => base44.entities.Agent.list(),
   });
 
-  const { data: domains = [] } = useQuery({
-    queryKey: ['domains'],
-    queryFn: async () => {
-      if (!base44.entities.Domain) return [];
-      return base44.entities.Domain.list();
-    },
-    retry: false,
-  });
-
   const agents = useMemo(() => rawAgents.map(resolveAgent), [rawAgents]);
 
-  const domainMap = useMemo(() => {
-    const m = {};
-    domains.forEach(d => { m[d.id] = d; });
-    return m;
-  }, [domains]);
+  // Derive domains from agent domain_tags — no separate Domain entity needed
+  const domains = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    agents.forEach(a => {
+      (a.domain_tags || []).forEach(tag => {
+        if (!seen.has(tag)) {
+          seen.add(tag);
+          list.push({ id: tag, name: tag, color: tagColor(tag) });
+        }
+      });
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
@@ -103,50 +103,20 @@ export default function AgentManager() {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  // Find existing Domain by name (case-insensitive) or create a new one.
-  const resolveOrCreateDomain = async (name, currentDomains) => {
-    const norm = name.trim().toLowerCase();
-    const existing = currentDomains.find(d => d.name.toLowerCase() === norm);
-    if (existing) return existing.id;
-    const created = await base44.entities.Domain.create({ name: name.trim(), color: tagColor(name) });
-    return created.id;
-  };
-
   const handleImport = async (list) => {
-    const hasDomainEntity = !!base44.entities.Domain;
-
-    // Collect unique domain names from parsed agents
-    const uniqueNames = hasDomainEntity
-      ? [...new Set(list.map(a => a._domain_name).filter(Boolean))]
-      : [];
-
-    // Fetch fresh domain list for accurate name matching
-    let currentDomains = domains;
-    if (hasDomainEntity && uniqueNames.length > 0) {
-      try { currentDomains = await base44.entities.Domain.list(); } catch { /* use cached */ }
-    }
-
-    // Resolve (or create) each unique domain name → id
-    const domainIdMap = {};
-    if (hasDomainEntity) {
-      await Promise.all(uniqueNames.map(async (name) => {
-        domainIdMap[name] = await resolveOrCreateDomain(name, currentDomains);
-      }));
-    }
-
-    // Build agent payloads with domain_id set, _domain_name stripped
     const payloads = list.map(a => {
       // eslint-disable-next-line no-unused-vars
       const { _domain_name, ...rest } = a;
-      const domain_id = _domain_name ? (domainIdMap[_domain_name] || '') : '';
-      const payload = { ...rest, domain_id };
-      payload.system_prompt = encodeAgentData(payload);
-      return payload;
+      // If _domain_name is present, add it to domain_tags
+      if (_domain_name && !rest.domain_tags?.includes(_domain_name.toLowerCase())) {
+        rest.domain_tags = [...(rest.domain_tags || []), _domain_name.toLowerCase()];
+      }
+      rest.system_prompt = encodeAgentData(rest);
+      return rest;
     });
 
     await Promise.all(payloads.map(a => base44.entities.Agent.create(a)));
     queryClient.invalidateQueries({ queryKey: ['agents'] });
-    queryClient.invalidateQueries({ queryKey: ['domains'] });
     setModal(null);
   };
 
@@ -158,7 +128,9 @@ export default function AgentManager() {
       || a.discipline?.toLowerCase().includes(search.toLowerCase())
       || a.domain_tags?.some(t => t.toLowerCase().includes(search.toLowerCase()));
     const matchDomain = !filterDomainId
-      || (filterDomainId === '__unassigned' ? !a.domain_id : a.domain_id === filterDomainId);
+      || (filterDomainId === '__unassigned'
+        ? !a.domain_tags?.length
+        : a.domain_tags?.includes(filterDomainId));
     return matchSearch && matchDomain;
   }), [agents, search, filterDomainId]);
 
@@ -182,11 +154,11 @@ export default function AgentManager() {
         : domains;
       const assigned = new Set();
       const result = domainList.map(d => {
-        const items = sorted.filter(a => a.domain_id === d.id);
+        const items = sorted.filter(a => a.domain_tags?.includes(d.id));
         items.forEach(a => assigned.add(a.id));
         return { key: d.id, label: d.name, color: d.color || tagColor(d.name), items };
       });
-      result.push({ key: 'unassigned', label: 'No Domain', color: '#546E7A', items: sorted.filter(a => !assigned.has(a.id)) });
+      result.push({ key: 'unassigned', label: 'No Domain', color: '#546E7A', items: sorted.filter(a => !assigned.has(a.id) && !a.domain_tags?.length) });
       return result.filter(g => g.items.length > 0);
     }
     if (groupBy === 'severity') {
@@ -205,7 +177,7 @@ export default function AgentManager() {
 
   const redCount  = agents.filter(a => a.team === 'red').length;
   const blueCount = agents.filter(a => a.team === 'blue').length;
-  const activeDomain = filterDomainId ? domainMap[filterDomainId] : null;
+  const activeDomain = filterDomainId ? domains.find(d => d.id === filterDomainId) : null;
 
   if (agentsLoading) {
     return (
@@ -246,7 +218,7 @@ export default function AgentManager() {
             </button>
 
             {domains.map(d => {
-              const count = agents.filter(a => a.domain_id === d.id).length;
+              const count = agents.filter(a => a.domain_tags?.includes(d.id)).length;
               const active = filterDomainId === d.id;
               const color = d.color || tagColor(d.name);
               return (
@@ -266,7 +238,7 @@ export default function AgentManager() {
             })}
 
             {(() => {
-              const count = agents.filter(a => !a.domain_id).length;
+              const count = agents.filter(a => !a.domain_tags?.length).length;
               if (!count) return null;
               const active = filterDomainId === '__unassigned';
               return (
@@ -441,7 +413,7 @@ export default function AgentManager() {
                     <AgentCard
                       key={agent.id}
                       agent={agent}
-                      domain={agent.domain_id ? domainMap[agent.domain_id] : undefined}
+                      domain={agent.domain_tags?.[0] ? { id: agent.domain_tags[0], name: agent.domain_tags[0], color: tagColor(agent.domain_tags[0]) } : undefined}
                       onEdit={bulkMode ? undefined : (a) => setModal(a)}
                       onDelete={bulkMode ? undefined : handleDelete}
                       onClone={bulkMode ? undefined : handleClone}
