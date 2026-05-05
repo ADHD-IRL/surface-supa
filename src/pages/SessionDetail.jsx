@@ -21,6 +21,20 @@ import DebateRoster from '@/components/session/DebateRoster';
 import ReactMarkdown from 'react-markdown';
 import { buildAgentSystemPrompt } from '@/lib/agentData';
 
+function normalizeRound(round) {
+  if (!round) return round;
+  if (round.red_responses) return round;
+  return {
+    ...round,
+    red_responses: round.red_response
+      ? [{ agent_id: round.red_agent_id, agent_name: round.red_agent_name || 'Red Agent', response: round.red_response }]
+      : [],
+    blue_responses: round.blue_response
+      ? [{ agent_id: round.blue_agent_id, agent_name: round.blue_agent_name || 'Blue Agent', response: round.blue_response }]
+      : [],
+  };
+}
+
 export default function SessionDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -62,49 +76,48 @@ export default function SessionDetail() {
       const redAgents = agents.filter(a => a.team === 'red' && (session.selected_agents?.length === 0 || session.selected_agents?.includes(a.id)));
       const blueAgents = agents.filter(a => a.team === 'blue' && (session.selected_agents?.length === 0 || session.selected_agents?.includes(a.id)));
 
-      const redAgent = redAgents[0];
-      const blueAgent = blueAgents[0];
-
-      if (!redAgent || !blueAgent) throw new Error('Need at least one red and one blue agent');
+      if (!redAgents.length || !blueAgents.length) throw new Error('Need at least one red and one blue agent');
 
       const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
       const rounds = [];
 
       for (let r = 0; r < roundCount; r++) {
-        setRunningStep(`Round ${r + 1}: Red team analyzing...`);
-
-        const previousContext = rounds.map(rd =>
-          `Round ${rd.round_number}:\nRed (${rd.red_agent_name}): ${rd.red_response}\nBlue (${rd.blue_agent_name}): ${rd.blue_response}`
-        ).join('\n\n');
-
-        const redPrompt = `${buildAgentSystemPrompt(redAgent)}\n\nScenario: ${session.scenario}\n${session.reference_urls?.length ? `\nReference URLs: ${session.reference_urls.join(', ')}` : ''}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your Round ${r + 1} attack analysis. Identify specific threats, vulnerabilities, and attack chains. Be detailed and actionable.`;
-
-        const redResponse = await base44.integrations.Core.InvokeLLM({ prompt: redPrompt });
-
         const roundData = {
           round_number: r + 1,
-          red_agent_id: redAgent.id,
-          red_agent_name: redAgent.name,
-          red_response: redResponse,
-          blue_agent_id: blueAgent.id,
-          blue_agent_name: blueAgent.name,
-          blue_response: '',
+          red_responses: [],
+          blue_responses: [],
           status: 'running',
           timestamp: new Date().toISOString(),
         };
-
         rounds.push(roundData);
-        await base44.entities.Session.update(id, { rounds: [...rounds] });
-        queryClient.invalidateQueries({ queryKey: ['session', id] });
 
-        setRunningStep(`Round ${r + 1}: Blue team responding...`);
+        const previousContext = rounds.slice(0, -1).map(rd =>
+          `Round ${rd.round_number}:\n` +
+          rd.red_responses.map(x => `Red (${x.agent_name}): ${x.response}`).join('\n') + '\n' +
+          rd.blue_responses.map(x => `Blue (${x.agent_name}): ${x.response}`).join('\n')
+        ).join('\n\n');
 
-        const bluePrompt = `${buildAgentSystemPrompt(blueAgent)}\n\nScenario: ${session.scenario}\n\nRed team attack analysis (Round ${r + 1}, by ${redAgent.name}):\n${redResponse}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your defensive response. Counter each attack vector with specific mitigations, detection methods, and resilience measures. Be practical and implementable.`;
+        for (const redAgent of redAgents) {
+          setRunningStep(`Round ${r + 1}: ${redAgent.name} (Red) analyzing...`);
+          const redPrompt = `${buildAgentSystemPrompt(redAgent)}\n\nScenario: ${session.scenario}\n${session.reference_urls?.length ? `\nReference URLs: ${session.reference_urls.join(', ')}` : ''}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your Round ${r + 1} attack analysis. Identify specific threats, vulnerabilities, and attack chains. Be detailed and actionable.`;
+          const response = await base44.integrations.Core.InvokeLLM({ prompt: redPrompt });
+          roundData.red_responses.push({ agent_id: redAgent.id, agent_name: redAgent.name, response });
+          await base44.entities.Session.update(id, { rounds: [...rounds] });
+          queryClient.invalidateQueries({ queryKey: ['session', id] });
+        }
 
-        const blueResponse = await base44.integrations.Core.InvokeLLM({ prompt: bluePrompt });
+        const allRedContext = roundData.red_responses.map(x => `${x.agent_name}:\n${x.response}`).join('\n\n---\n\n');
 
-        rounds[r].blue_response = blueResponse;
-        rounds[r].status = 'completed';
+        for (const blueAgent of blueAgents) {
+          setRunningStep(`Round ${r + 1}: ${blueAgent.name} (Blue) responding...`);
+          const bluePrompt = `${buildAgentSystemPrompt(blueAgent)}\n\nScenario: ${session.scenario}\n\nRed team attack analyses (Round ${r + 1}):\n${allRedContext}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your defensive response. Counter each attack vector with specific mitigations, detection methods, and resilience measures. Be practical and implementable.`;
+          const response = await base44.integrations.Core.InvokeLLM({ prompt: bluePrompt });
+          roundData.blue_responses.push({ agent_id: blueAgent.id, agent_name: blueAgent.name, response });
+          await base44.entities.Session.update(id, { rounds: [...rounds] });
+          queryClient.invalidateQueries({ queryKey: ['session', id] });
+        }
+
+        roundData.status = 'completed';
         await base44.entities.Session.update(id, { rounds: [...rounds] });
         queryClient.invalidateQueries({ queryKey: ['session', id] });
       }
@@ -113,7 +126,9 @@ export default function SessionDetail() {
       setRunningStep('Generating executive summary & risk registry...');
 
       const allTranscripts = rounds.map(rd =>
-        `Round ${rd.round_number}:\nRed (${rd.red_agent_name}): ${rd.red_response}\nBlue (${rd.blue_agent_name}): ${rd.blue_response}`
+        `Round ${rd.round_number}:\n` +
+        rd.red_responses.map(x => `Red (${x.agent_name}): ${x.response}`).join('\n') + '\n' +
+        rd.blue_responses.map(x => `Blue (${x.agent_name}): ${x.response}`).join('\n')
       ).join('\n\n---\n\n');
 
       const analysisResult = await base44.integrations.Core.InvokeLLM({
@@ -183,9 +198,12 @@ export default function SessionDetail() {
 
   const handleGeneratePlaybook = async () => {
     setGeneratingPlaybook(true);
-    const allTranscripts = session.rounds.map(rd =>
-      `Round ${rd.round_number}:\nRed (${rd.red_agent_name}): ${rd.red_response}\nBlue (${rd.blue_agent_name}): ${rd.blue_response}`
-    ).join('\n\n---\n\n');
+    const allTranscripts = session.rounds.map(rd => {
+      const nr = normalizeRound(rd);
+      return `Round ${nr.round_number}:\n` +
+        nr.red_responses.map(x => `Red (${x.agent_name}): ${x.response}`).join('\n') + '\n' +
+        nr.blue_responses.map(x => `Blue (${x.agent_name}): ${x.response}`).join('\n');
+    }).join('\n\n---\n\n');
 
     const playbook = await base44.integrations.Core.InvokeLLM({
       prompt: `You are a senior risk and security strategist. Based on the following Red/Blue adversarial debate about: "${session.scenario}"\n\nDebate transcripts:\n${allTranscripts}\n\nGenerate a concise, actionable mitigation playbook that a team can execute immediately.`,
@@ -526,28 +544,20 @@ export default function SessionDetail() {
       const TW = 34; // team label column, matches ~148px online
       const RW = CONTENT_W - TW;
 
-      const TEAMS = (rd) => [
-        {
-          label:      'Red Team',
-          agentName:  rd.red_agent_name  || 'Red Agent',
-          response:   rd.red_response,
-          teamColor:  [207, 33, 33],
-          badgeBg:    [255, 245, 245],
-          badgeBorder:[207, 33, 33],
-          rowBg:      [255, 249, 249],
-          divColor:   [247, 193, 193],
-        },
-        {
-          label:      'Blue Team',
-          agentName:  rd.blue_agent_name || 'Blue Agent',
-          response:   rd.blue_response,
-          teamColor:  [37, 99, 235],
-          badgeBg:    [245, 248, 255],
-          badgeBorder:[37, 99, 235],
-          rowBg:      [249, 251, 255],
-          divColor:   [184, 207, 250],
-        },
-      ];
+      const TEAMS = (rd) => {
+        const nr = normalizeRound(rd);
+        const redRows = nr.red_responses.map(r => ({
+          label: 'Red Team', agentName: r.agent_name || 'Red Agent', response: r.response,
+          teamColor: [207, 33, 33], badgeBg: [255, 245, 245], badgeBorder: [207, 33, 33],
+          rowBg: [255, 249, 249], divColor: [247, 193, 193],
+        }));
+        const blueRows = nr.blue_responses.map(b => ({
+          label: 'Blue Team', agentName: b.agent_name || 'Blue Agent', response: b.response,
+          teamColor: [37, 99, 235], badgeBg: [245, 248, 255], badgeBorder: [37, 99, 235],
+          rowBg: [249, 251, 255], divColor: [184, 207, 250],
+        }));
+        return [...redRows, ...blueRows];
+      };
 
       session.rounds.forEach((rd) => {
         y += 4;
@@ -864,7 +874,7 @@ export default function SessionDetail() {
                 const round  = session.rounds?.[i];
                 const done   = round?.status === 'completed';
                 const active = round?.status === 'running';
-                const redDone = !!round?.red_response;
+                const redDone = (round?.red_responses?.length ?? 0) > 0 || !!round?.red_response;
                 return (
                   <div key={i} className="flex items-center gap-2 text-xs">
                     {done
@@ -875,16 +885,21 @@ export default function SessionDetail() {
                     <span className={cn('font-medium', done && 'text-green-team', active && 'text-primary', !done && !active && 'text-muted-foreground')}>
                       Round {i + 1} of {roundCount}
                     </span>
-                    {done && round && (
-                      <span className="text-muted-foreground">
-                        — <span className="text-red-team">{round.red_agent_name}</span> vs <span className="text-blue-team">{round.blue_agent_name}</span> · complete
-                      </span>
-                    )}
+                    {done && round && (() => {
+                      const nr = normalizeRound(round);
+                      const rNames = nr.red_responses.map(x => x.agent_name).filter(Boolean).join(', ') || 'Red';
+                      const bNames = nr.blue_responses.map(x => x.agent_name).filter(Boolean).join(', ') || 'Blue';
+                      return (
+                        <span className="text-muted-foreground">
+                          — <span className="text-red-team">{rNames}</span> vs <span className="text-blue-team">{bNames}</span> · complete
+                        </span>
+                      );
+                    })()}
                     {active && (
                       <span className="text-muted-foreground flex items-center gap-1.5">
                         — {redDone
-                          ? <><CheckCircle2 className="w-3 h-3 text-red-team inline" /> <span className="text-red-team">{round.red_agent_name}</span> <span className="text-muted-foreground">→</span> <Loader2 className="w-3 h-3 animate-spin text-blue-team inline" /> <span className="text-blue-team">{round.blue_agent_name}</span> responding</>
-                          : <><Loader2 className="w-3 h-3 animate-spin text-red-team inline" /> <span className="text-red-team">{activeRound?.red_agent_name || 'Red'}</span> analyzing</>
+                          ? <><CheckCircle2 className="w-3 h-3 text-red-team inline" /> <span className="text-red-team">Red</span> <span className="text-muted-foreground">→</span> <Loader2 className="w-3 h-3 animate-spin text-blue-team inline" /> <span className="text-blue-team">Blue</span> responding</>
+                          : <><Loader2 className="w-3 h-3 animate-spin text-red-team inline" /> <span className="text-red-team">Red</span> analyzing</>
                         }
                       </span>
                     )}

@@ -18,34 +18,53 @@ function ThinkingDots({ color }) {
   );
 }
 
+function normalizeRound(round) {
+  if (!round) return round;
+  if (round.red_responses) return round;
+  return {
+    ...round,
+    red_responses: round.red_response
+      ? [{ agent_id: round.red_agent_id, agent_name: round.red_agent_name || 'Red Agent', response: round.red_response }]
+      : [],
+    blue_responses: round.blue_response
+      ? [{ agent_id: round.blue_agent_id, agent_name: round.blue_agent_name || 'Blue Agent', response: round.blue_response }]
+      : [],
+  };
+}
+
 export default function DebateRound({ round, index, total }) {
   if (!round) return null;
 
-  const isRunning   = round.status === 'running';
-  const isCompleted = round.status === 'completed';
-  const redDone     = !!round.red_response;
-  const blueDone    = !!round.blue_response;
-  const redThinking  = isRunning && !redDone;
-  const blueThinking = isRunning && redDone && !blueDone;
+  const nr = normalizeRound(round);
+  const { red_responses, blue_responses } = nr;
+
+  const isRunning    = round.status === 'running';
+  const isCompleted  = round.status === 'completed';
+  const anyRedDone   = red_responses.length > 0;
+  const redThinking  = isRunning && !anyRedDone;
+  const blueThinking = isRunning && anyRedDone && blue_responses.length === 0;
 
   const rows = [
-    {
-      team: 'red',
-      label: 'Red Team',
-      agentName: round.red_agent_name,
-      response: round.red_response,
-      isThinking: redThinking,
-      waitingLabel: 'Awaiting red team analysis...',
-    },
-    {
-      team: 'blue',
-      label: 'Blue Team',
-      agentName: round.blue_agent_name,
-      response: round.blue_response,
-      isThinking: blueThinking,
-      waitingLabel: 'Waiting for red team to finish...',
-    },
+    ...red_responses.map(r => ({
+      team: 'red', label: 'Red Team', agentName: r.agent_name, response: r.response,
+      isThinking: false, waitingLabel: '',
+    })),
+    ...(redThinking ? [{ team: 'red', label: 'Red Team', agentName: '', response: null, isThinking: true, waitingLabel: 'Analyzing...' }] : []),
+    ...blue_responses.map(b => ({
+      team: 'blue', label: 'Blue Team', agentName: b.agent_name, response: b.response,
+      isThinking: false, waitingLabel: '',
+    })),
+    ...(blueThinking ? [{ team: 'blue', label: 'Blue Team', agentName: '', response: null, isThinking: true, waitingLabel: 'Responding...' }] : []),
+    ...(red_responses.length === 0 && blue_responses.length === 0 && !isRunning ? [
+      { team: 'red',  label: 'Red Team',  agentName: '', response: null, isThinking: false, waitingLabel: 'Awaiting red team analysis...' },
+      { team: 'blue', label: 'Blue Team', agentName: '', response: null, isThinking: false, waitingLabel: 'Waiting for red team to finish...' },
+    ] : []),
   ];
+
+  const redNames  = red_responses.map(r => r.agent_name).filter(Boolean);
+  const blueNames = blue_responses.map(b => b.agent_name).filter(Boolean);
+  const redLabel  = redNames.length  ? redNames.join(', ')  : round.red_agent_name  || 'Red Agent';
+  const blueLabel = blueNames.length ? blueNames.join(', ') : round.blue_agent_name || 'Blue Agent';
 
   return (
     <Card className="overflow-hidden">
@@ -58,20 +77,16 @@ export default function DebateRound({ round, index, total }) {
 
         {/* Agent pills */}
         <div className="flex items-center gap-1.5 ml-1 flex-wrap">
-          <span className="text-[11px] text-red-team font-medium">
-            {round.red_agent_name || 'Red Agent'}
-          </span>
+          <span className="text-[11px] text-red-team font-medium">{redLabel}</span>
           <span className="text-[10px] text-muted-foreground">vs</span>
-          <span className="text-[11px] text-blue-team font-medium">
-            {round.blue_agent_name || 'Blue Agent'}
-          </span>
+          <span className="text-[11px] text-blue-team font-medium">{blueLabel}</span>
         </div>
 
         {/* Status */}
         <div className="ml-auto flex items-center gap-2 flex-shrink-0">
           {isRunning && (
             <div className="flex items-center gap-1.5 text-xs text-amber-600">
-              {redDone
+              {anyRedDone
                 ? <><CheckCircle2 className="w-3 h-3 text-red-team" /><span className="text-red-team">Red</span><span className="text-muted-foreground">→</span><Loader2 className="w-3 h-3 animate-spin text-blue-team" /><span className="text-blue-team">Blue responding…</span></>
                 : <><Loader2 className="w-3 h-3 animate-spin text-red-team" /><span className="text-red-team">Red analyzing…</span></>
               }
@@ -95,10 +110,10 @@ export default function DebateRound({ round, index, total }) {
           <col />
         </colgroup>
         <tbody>
-          {rows.map(({ team, label, agentName, response, isThinking, waitingLabel }) => {
+          {rows.map(({ team, label, agentName, response, isThinking, waitingLabel }, rowIdx) => {
             const isRed = team === 'red';
             return (
-              <tr key={team} className={cn("border-b border-border last:border-b-0", isRed ? "bg-red-team/[0.02]" : "bg-blue-team/[0.02]")}>
+              <tr key={`${team}-${rowIdx}`} className={cn("border-b border-border last:border-b-0", isRed ? "bg-red-team/[0.02]" : "bg-blue-team/[0.02]")}>
                 <td className={cn(
                   "align-top px-4 py-4 border-r",
                   isRed ? "border-r-red-team/20" : "border-r-blue-team/20"
@@ -115,9 +130,11 @@ export default function DebateRound({ round, index, total }) {
                     >
                       {label}
                     </Badge>
-                    <span className="text-xs font-semibold text-foreground leading-snug">
-                      {agentName || (isRed ? 'Red Agent' : 'Blue Agent')}
-                    </span>
+                    {agentName && (
+                      <span className="text-xs font-semibold text-foreground leading-snug">
+                        {agentName}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="align-top px-5 py-4">
@@ -139,4 +156,3 @@ export default function DebateRound({ round, index, total }) {
     </Card>
   );
 }
-
