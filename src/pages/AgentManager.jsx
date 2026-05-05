@@ -36,16 +36,30 @@ export default function AgentManager() {
     queryFn: () => base44.entities.Agent.list(),
   });
 
-  // Domain entities — gracefully returns [] if schema not yet deployed
-  const { data: domains = [] } = useQuery({
+  // Domain entities — null when schema not yet deployed
+  const { data: fetchedDomains = null } = useQuery({
     queryKey: ['domains'],
     queryFn: async () => {
-      try { return await base44.entities.Domain.list(); } catch { return []; }
+      try { return await base44.entities.Domain.list(); } catch { return null; }
     },
     retry: false,
   });
 
   const agents = useMemo(() => rawAgents.map(resolveAgent), [rawAgents]);
+
+  // Use fetched Domain entities when available; otherwise derive from agent.domain_id strings
+  const domains = useMemo(() => {
+    if (fetchedDomains?.length > 0) return fetchedDomains;
+    const seen = new Set();
+    const list = [];
+    agents.forEach(a => {
+      if (a.domain_id && !seen.has(a.domain_id)) {
+        seen.add(a.domain_id);
+        list.push({ id: a.domain_id, name: a.domain_id, color: tagColor(a.domain_id) });
+      }
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [fetchedDomains, agents]);
 
   const domainMap = useMemo(() => {
     const m = {};
@@ -104,21 +118,44 @@ export default function AgentManager() {
   });
 
   const handleImport = async (list) => {
-    // Build agent payloads: strip _domain_name, encode system_prompt
+    const uniqueNames = [...new Set(list.map(a => a._domain_name).filter(Boolean))];
+
+    // Resolve domain names → ids. Try Domain entity first; fall back to name-as-id.
+    const domainIdMap = {};
+    if (uniqueNames.length > 0) {
+      let currentDomains = [];
+      try { currentDomains = await base44.entities.Domain.list(); } catch { /* schema not deployed */ }
+      await Promise.all(uniqueNames.map(async (name) => {
+        const norm = name.trim().toLowerCase();
+        const existing = currentDomains.find(d => d.name.toLowerCase() === norm);
+        if (existing) {
+          domainIdMap[name] = existing.id;
+        } else {
+          try {
+            const created = await base44.entities.Domain.create({ name: name.trim(), color: tagColor(name) });
+            domainIdMap[name] = created.id;
+          } catch {
+            domainIdMap[name] = name.trim(); // use name directly when entity API unavailable
+          }
+        }
+      }));
+    }
+
     const payloads = list.map(a => {
       // eslint-disable-next-line no-unused-vars
       const { _domain_name, ...rest } = a;
-      const payload = { ...rest };
+      const domain_id = _domain_name ? (domainIdMap[_domain_name] ?? _domain_name.trim()) : '';
+      const payload = { ...rest, domain_id };
       payload.system_prompt = encodeAgentData(payload);
       return payload;
     });
 
-    // Create agents sequentially to avoid rate limit errors
     for (const payload of payloads) {
       await base44.entities.Agent.create(payload);
     }
 
     queryClient.invalidateQueries({ queryKey: ['agents'] });
+    queryClient.invalidateQueries({ queryKey: ['domains'] });
     setModal(null);
   };
 
