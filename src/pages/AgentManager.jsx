@@ -103,44 +103,22 @@ export default function AgentManager() {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  // Finds an existing Domain by name (case-insensitive) or creates a new one.
-  // Returns '' if the Domain entity schema isn't deployed yet.
-  const resolveOrCreateDomain = async (name, currentDomains) => {
-    const norm = name.trim().toLowerCase();
-    const existing = currentDomains.find(d => d.name.toLowerCase() === norm);
-    if (existing) return existing.id;
-    try {
-      const created = await base44.entities.Domain.create({ name: name.trim(), color: tagColor(name) });
-      return created.id;
-    } catch { return ''; }
-  };
-
   const handleImport = async (list) => {
-    const uniqueNames = [...new Set(list.map(a => a._domain_name).filter(Boolean))];
-
-    // Fetch fresh domain list; returns [] if schema not yet deployed
-    let currentDomains = [];
-    try { currentDomains = await base44.entities.Domain.list(); } catch { /* schema not deployed yet */ }
-
-    // Resolve (or create) each unique domain name → id
-    const domainIdMap = {};
-    await Promise.all(uniqueNames.map(async (name) => {
-      domainIdMap[name] = await resolveOrCreateDomain(name, currentDomains);
-    }));
-
-    // Build agent payloads: set domain_id, strip _domain_name
+    // Build agent payloads: strip _domain_name, encode system_prompt
     const payloads = list.map(a => {
       // eslint-disable-next-line no-unused-vars
       const { _domain_name, ...rest } = a;
-      const domain_id = _domain_name ? (domainIdMap[_domain_name] || '') : '';
-      const payload = { ...rest, domain_id };
+      const payload = { ...rest };
       payload.system_prompt = encodeAgentData(payload);
       return payload;
     });
 
-    await Promise.all(payloads.map(a => base44.entities.Agent.create(a)));
+    // Create agents sequentially to avoid rate limit errors
+    for (const payload of payloads) {
+      await base44.entities.Agent.create(payload);
+    }
+
     queryClient.invalidateQueries({ queryKey: ['agents'] });
-    queryClient.invalidateQueries({ queryKey: ['domains'] });
     setModal(null);
   };
 
