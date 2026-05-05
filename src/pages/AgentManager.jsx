@@ -8,11 +8,12 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Plus, Upload, Trash2, CheckSquare, Square, Loader2, Search, X, Bot } from 'lucide-react';
+import { Plus, Upload, Trash2, CheckSquare, Square, Loader2, Search, X, Bot, FileDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AgentCard, { tagColor } from '@/components/agents/AgentCard';
 import AgentForm from '@/components/agents/AgentForm';
 import AgentImportModal from '@/components/agents/AgentImportModal';
+import PromptExportModal from '@/components/agents/PromptExportModal';
 import { resolveAgent, encodeAgentData } from '@/lib/agentData';
 
 const SEVERITY_ORDER  = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
@@ -342,6 +343,12 @@ export default function AgentManager() {
               {bulkMode ? 'Cancel' : 'Select'}
             </button>
             <button
+              onClick={() => setModal('export')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <FileDown className="w-3.5 h-3.5" /> Export Prompts
+            </button>
+            <button
               onClick={() => setModal('import')}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
@@ -498,6 +505,14 @@ export default function AgentManager() {
           onImport={handleImport}
           onCancel={() => setModal(null)}
           importing={false}
+        />
+      )}
+
+      {modal === 'export' && (
+        <PromptExportModal
+          agents={agents}
+          domainMap={domainMap}
+          onClose={() => setModal(null)}
         />
       )}
     </div>
