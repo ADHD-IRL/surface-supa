@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, Clock, MinusCircle, Users, Circle } from 'lucide-react';
+import { CheckCircle2, Clock, MinusCircle, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveAgent } from '@/lib/agentData';
 
@@ -39,17 +39,33 @@ function AgentRow({ agent: rawAgent, roundsDone, roundsTotal, note, noteColor })
   );
 }
 
-export default function DebateRoster({ session, agents }) {
-  const roundCount  = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
-  const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
-  const isRunning   = session.status === 'running';
-  const isCompleted = session.status === 'completed';
+function normalizeRound(round) {
+  if (!round) return round;
+  if ('red_responses' in round) return round;
+  return {
+    ...round,
+    red_responses: round.red_response
+      ? [{ agent_id: round.red_agent_id, agent_name: round.red_agent_name || 'Red Agent', response: round.red_response }]
+      : [],
+    blue_responses: round.blue_response
+      ? [{ agent_id: round.blue_agent_id, agent_name: round.blue_agent_name || 'Blue Agent', response: round.blue_response }]
+      : [],
+  };
+}
 
-  // Agents that actually debated (from round data)
-  const activeRedId  = session.rounds?.[0]?.red_agent_id;
-  const activeBlueId = session.rounds?.[0]?.blue_agent_id;
-  const activeRed    = agents.find(a => a.id === activeRedId);
-  const activeBlue   = agents.find(a => a.id === activeBlueId);
+export default function DebateRoster({ session, agents }) {
+  const roundCount     = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
+  const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
+  const isRunning      = session.status === 'running';
+  const isCompleted    = session.status === 'completed';
+
+  // Collect all agent IDs that actually responded across all rounds
+  const activeRedIds = new Set(
+    session.rounds?.flatMap(r => normalizeRound(r)?.red_responses?.map(x => x.agent_id) ?? []) ?? []
+  );
+  const activeBlueIds = new Set(
+    session.rounds?.flatMap(r => normalizeRound(r)?.blue_responses?.map(x => x.agent_id) ?? []) ?? []
+  );
 
   // Eligible agents for this session
   const eligible     = session.selected_agents?.length
@@ -58,23 +74,16 @@ export default function DebateRoster({ session, agents }) {
   const eligibleRed  = eligible.filter(a => a.team === 'red');
   const eligibleBlue = eligible.filter(a => a.team === 'blue');
 
-  // Benched: eligible but not the one picked (only first per team debates)
-  const benchedRed   = eligibleRed.filter(a => a.id !== activeRedId);
-  const benchedBlue  = eligibleBlue.filter(a => a.id !== activeBlueId);
-  const benched      = [...benchedRed, ...benchedBlue];
+  const noRed  = eligibleRed.length  === 0;
+  const noBlue = eligibleBlue.length === 0;
+
+  // Pre-start: no rounds have run yet
+  const hasStarted = activeRedIds.size > 0 || activeBlueIds.size > 0;
 
   // Excluded: agents that exist but were not in this session's selection
   const excluded = session.selected_agents?.length
     ? agents.filter(a => !session.selected_agents.includes(a.id))
     : [];
-
-  const noRed  = eligibleRed.length  === 0;
-  const noBlue = eligibleBlue.length === 0;
-
-  // Pre-start: show expected participants from selected agents
-  const isPreStart   = !activeRed && !activeBlue;
-  const preStartRed  = isPreStart ? eligibleRed[0]  : null;
-  const preStartBlue = isPreStart ? eligibleBlue[0] : null;
 
   return (
     <Card className="p-4">
@@ -95,55 +104,40 @@ export default function DebateRoster({ session, agents }) {
 
       <div className="space-y-0">
 
-        {/* ── Participating ── */}
-        {(activeRed || activeBlue || preStartRed || preStartBlue) && (
-          <div className="mb-2">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              {isPreStart ? 'Assigned' : 'Participating'}
-            </p>
-            {(activeRed || preStartRed) && (
-              <AgentRow
-                agent={activeRed || preStartRed}
-                roundsDone={completedRounds}
-                roundsTotal={roundCount}
-              />
-            )}
-            {(activeBlue || preStartBlue) && (
-              <AgentRow
-                agent={activeBlue || preStartBlue}
-                roundsDone={completedRounds}
-                roundsTotal={roundCount}
-              />
-            )}
-            {noRed && (
-              <div className="flex items-center gap-2 py-1.5">
-                <MinusCircle className="w-3.5 h-3.5 text-red-team flex-shrink-0" />
-                <span className="text-sm italic text-red-team">No red team agent available — debate cannot run</span>
-              </div>
-            )}
-            {noBlue && (
-              <div className="flex items-center gap-2 py-1.5">
-                <MinusCircle className="w-3.5 h-3.5 text-blue-team flex-shrink-0" />
-                <span className="text-sm italic text-blue-team">No blue team agent available — debate cannot run</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Benched ── */}
-        {benched.length > 0 && (
-          <div className="border-t border-border pt-2 mt-1">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Benched
-            </p>
-            <p className="text-[11px] text-muted-foreground mb-1.5">
-              Selected for this session but only the first agent per team enters the debate.
-            </p>
-            {benched.map(a => (
-              <AgentRow key={a.id} agent={a} note="did not debate" />
-            ))}
-          </div>
-        )}
+        {/* ── Participating / Assigned ── */}
+        <div className="mb-2">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+            {hasStarted ? 'Participating' : 'Assigned'}
+          </p>
+          {eligibleRed.map(a => (
+            <AgentRow
+              key={a.id}
+              agent={a}
+              roundsDone={hasStarted ? completedRounds : undefined}
+              roundsTotal={hasStarted ? roundCount : undefined}
+            />
+          ))}
+          {eligibleBlue.map(a => (
+            <AgentRow
+              key={a.id}
+              agent={a}
+              roundsDone={hasStarted ? completedRounds : undefined}
+              roundsTotal={hasStarted ? roundCount : undefined}
+            />
+          ))}
+          {noRed && (
+            <div className="flex items-center gap-2 py-1.5">
+              <MinusCircle className="w-3.5 h-3.5 text-red-team flex-shrink-0" />
+              <span className="text-sm italic text-red-team">No red team agent available — debate cannot run</span>
+            </div>
+          )}
+          {noBlue && (
+            <div className="flex items-center gap-2 py-1.5">
+              <MinusCircle className="w-3.5 h-3.5 text-blue-team flex-shrink-0" />
+              <span className="text-sm italic text-blue-team">No blue team agent available — debate cannot run</span>
+            </div>
+          )}
+        </div>
 
         {/* ── Excluded ── */}
         {excluded.length > 0 && (
