@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, X, Upload, ArrowRight, Link2, GitBranch } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Plus, X, Upload, ArrowRight, Link2, GitBranch, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
@@ -30,10 +31,16 @@ export default function NewSession() {
   });
   const [urlInput, setUrlInput] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [openDomains, setOpenDomains] = useState({});
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.filter({ status: 'active' }),
+  });
+
+  const { data: domains = [] } = useQuery({
+    queryKey: ['domains'],
+    queryFn: () => base44.entities.Domain.list(),
   });
 
   const createMutation = useMutation({
@@ -70,12 +77,44 @@ export default function NewSession() {
     }));
   };
 
+  const toggleDomainOpen = (key) =>
+    setOpenDomains(prev => ({ ...prev, [key]: !prev[key] }));
+
   const toggleDomain = (domain) => {
     setForm(f => ({
       ...f,
       domain_focus: f.domain_focus.includes(domain)
         ? f.domain_focus.filter(d => d !== domain)
         : [...f.domain_focus, domain],
+    }));
+  };
+
+  const domainMap = Object.fromEntries(domains.map(d => [d.id, d]));
+
+  const agentsByDomain = (() => {
+    const groups = new Map();
+    for (const agent of agents) {
+      const key = agent.domain_id || '__uncategorized__';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(agent);
+    }
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (a === '__uncategorized__') return 1;
+      if (b === '__uncategorized__') return -1;
+      const nameA = domainMap[a]?.name ?? a;
+      const nameB = domainMap[b]?.name ?? b;
+      return nameA.localeCompare(nameB);
+    });
+  })();
+
+  const toggleAllInDomain = (domainAgents) => {
+    const ids = domainAgents.map(a => a.id);
+    const allSelected = ids.every(id => form.selected_agents.includes(id));
+    setForm(f => ({
+      ...f,
+      selected_agents: allSelected
+        ? f.selected_agents.filter(id => !ids.includes(id))
+        : [...new Set([...f.selected_agents, ...ids])],
     }));
   };
 
@@ -230,28 +269,111 @@ export default function NewSession() {
         </div>
 
         {/* Agent Selection */}
-        <div className="space-y-3">
-          <Label className="text-sm font-semibold">Select Agents</Label>
-          <p className="text-xs text-muted-foreground -mt-1">Leave empty to use all active agents</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {agents.map(agent => (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold">Select Agents</Label>
+            <div className="flex gap-2">
               <button
-                key={agent.id}
-                onClick={() => toggleAgent(agent.id)}
-                className={cn(
-                  "flex items-center gap-3 p-3 rounded-lg border text-left transition-colors",
-                  form.selected_agents.includes(agent.id)
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/30"
-                )}
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground underline"
+                onClick={() => setForm(f => ({ ...f, selected_agents: agents.map(a => a.id) }))}
               >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{agent.name}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{agent.team} team</p>
-                </div>
+                All
               </button>
-            ))}
+              <span className="text-xs text-muted-foreground">/</span>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground underline"
+                onClick={() => setForm(f => ({ ...f, selected_agents: [] }))}
+              >
+                None
+              </button>
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground -mt-1">Leave empty to use all active agents</p>
+
+          <div className="border rounded-md overflow-hidden divide-y divide-border">
+            {agentsByDomain.map(([domainKey, domainAgents]) => {
+              const domain = domainMap[domainKey];
+              const domainName = domain?.name ?? (domainKey === '__uncategorized__' ? 'Uncategorized' : domainKey);
+              const domainColor = domain?.color ?? '#546E7A';
+              const selectedInDomain = domainAgents.filter(a => form.selected_agents.includes(a.id)).length;
+              const allSelected = selectedInDomain === domainAgents.length;
+              const isOpen = openDomains[domainKey] ?? false;
+
+              return (
+                <Collapsible key={domainKey} open={isOpen} onOpenChange={() => toggleDomainOpen(domainKey)}>
+                  <CollapsibleTrigger asChild>
+                    <div className={cn(
+                      "flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50",
+                      isOpen && "bg-muted/30"
+                    )}>
+                      <ChevronRight className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform flex-shrink-0", isOpen && "rotate-90")} />
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: domainColor }} />
+                      <span className="text-sm font-medium flex-1 truncate">{domainName}</span>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                        {selectedInDomain > 0 ? `${selectedInDomain}/` : ''}{domainAgents.length}
+                      </span>
+                      <button
+                        type="button"
+                        className={cn(
+                          "text-xs px-1.5 py-0.5 rounded flex-shrink-0",
+                          allSelected
+                            ? "bg-primary/10 text-primary hover:bg-primary/20"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        )}
+                        onClick={(e) => { e.stopPropagation(); toggleAllInDomain(domainAgents); }}
+                      >
+                        {allSelected ? 'Deselect' : 'Select all'}
+                      </button>
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="divide-y divide-border border-t border-border">
+                      {domainAgents.map(agent => {
+                        const isSelected = form.selected_agents.includes(agent.id);
+                        const isRed = agent.team === 'red';
+                        return (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            onClick={() => toggleAgent(agent.id)}
+                            className={cn(
+                              "w-full flex items-center gap-2.5 px-5 py-2 text-left hover:bg-muted/40 transition-colors",
+                              isSelected && (isRed ? "bg-red-500/5" : "bg-blue-500/5")
+                            )}
+                          >
+                            <div className={cn(
+                              "w-3 h-3 rounded border flex-shrink-0 flex items-center justify-center",
+                              isSelected
+                                ? isRed ? "bg-red-500 border-red-500" : "bg-blue-500 border-blue-500"
+                                : "border-muted-foreground/40"
+                            )}>
+                              {isSelected && <span className="text-white text-[8px] leading-none">✓</span>}
+                            </div>
+                            <span className="text-sm flex-1 truncate">{agent.name}</span>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[10px] px-1 py-0 capitalize flex-shrink-0",
+                                isRed ? "border-red-500/30 text-red-500" : "border-blue-500/30 text-blue-500"
+                              )}
+                            >
+                              {agent.team}
+                            </Badge>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
+          </div>
+
+          {form.selected_agents.length > 0 && (
+            <p className="text-xs text-muted-foreground">{form.selected_agents.length} agent{form.selected_agents.length !== 1 ? 's' : ''} selected</p>
+          )}
         </div>
       </Card>
 
