@@ -55,7 +55,6 @@ export default function Layout() {
                 />
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent to-sidebar" />
                 <div className="absolute inset-0 flex items-center px-4">
-                  <span className="text-lg font-bold text-white tracking-tight drop-shadow">Surface</span>
                 </div>
               </div>
             )}
