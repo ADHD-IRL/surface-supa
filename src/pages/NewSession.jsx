@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { tagColor } from '@/components/agents/AgentCard';
+import { resolveAgent } from '@/lib/agentData';
 import { Plus, X, Upload, ArrowRight, Link2, GitBranch, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -36,7 +37,7 @@ export default function NewSession() {
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
-    queryFn: () => base44.entities.Agent.filter({ status: 'active' }),
+    queryFn: async () => (await base44.entities.Agent.filter({ status: 'active' })).map(resolveAgent),
   });
 
   const { data: fetchedDomains = null } = useQuery({
