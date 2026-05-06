@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,7 +23,7 @@ import { buildAgentSystemPrompt } from '@/lib/agentData';
 
 function normalizeRound(round) {
   if (!round) return round;
-  if (round.red_responses) return round;
+  if ('red_responses' in round) return round;
   return {
     ...round,
     red_responses: round.red_response
@@ -41,6 +41,14 @@ export default function SessionDetail() {
   const queryClient = useQueryClient();
   const [runningStep, setRunningStep] = useState('');
   const [runningAgents, setRunningAgents] = useState(null);
+  const [debateStartTime, setDebateStartTime] = useState(null);
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+
+  useEffect(() => {
+    if (!debateStartTime) { setElapsedSecs(0); return; }
+    const t = setInterval(() => setElapsedSecs(Math.floor((Date.now() - debateStartTime) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [debateStartTime]);
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
 
   const deleteMutation = useMutation({
@@ -71,6 +79,7 @@ export default function SessionDetail() {
 
   const runDebateMutation = useMutation({
     mutationFn: async () => {
+      setDebateStartTime(Date.now());
       setRunningStep('Starting debate...');
       await base44.entities.Session.update(id, { status: 'running' });
 
@@ -203,12 +212,14 @@ export default function SessionDetail() {
       queryClient.invalidateQueries({ queryKey: ['session', id] });
       setRunningStep('');
       setRunningAgents(null);
+      setDebateStartTime(null);
     },
     onError: async () => {
       await base44.entities.Session.update(id, { status: 'failed' });
       queryClient.invalidateQueries({ queryKey: ['session', id] });
       setRunningStep('');
       setRunningAgents(null);
+      setDebateStartTime(null);
     },
   });
 
@@ -871,13 +882,42 @@ export default function SessionDetail() {
 
       {/* Running status */}
       {(runningStep || runningAgents) && (() => {
-        const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
+        const roundCount    = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
         const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
-        const isSynthesis = runningAgents?.phase === 'synthesis' || (!runningAgents && runningStep.startsWith('Generating'));
-        const doneAgents = runningAgents?.agents.filter(a => a.status === 'done').length ?? 0;
-        const totalAgents = runningAgents?.agents.length ?? 0;
-        const roundPct = Math.round((completedRounds / roundCount) * 100);
-        const prevDone = session.rounds?.filter(r => r.status === 'completed') ?? [];
+        const isSynthesis   = runningAgents?.phase === 'synthesis' || (!runningAgents && runningStep.startsWith('Generating'));
+        const doneAgents    = runningAgents?.agents.filter(a => a.status === 'done').length ?? 0;
+        const totalAgents   = runningAgents?.agents.length ?? 0;
+        const currentRound  = runningAgents?.round ?? 0;
+        const currentPhase  = runningAgents?.phase ?? '';
+
+        // Build phase step pipeline
+        const steps = [];
+        for (let r = 1; r <= roundCount; r++) {
+          const roundDone = (session.rounds?.find(rd => rd.round_number === r)?.status === 'completed') || r < currentRound;
+          const isThisRound = r === currentRound;
+          steps.push({
+            label: roundCount === 1 ? 'Red' : `R${r} Red`, team: 'red',
+            status: roundDone || (isThisRound && currentPhase === 'blue') ? 'done'
+              : isThisRound && currentPhase === 'red' ? 'active' : 'pending',
+          });
+          steps.push({
+            label: roundCount === 1 ? 'Blue' : `R${r} Blue`, team: 'blue',
+            status: roundDone ? 'done'
+              : isThisRound && currentPhase === 'blue' ? 'active' : 'pending',
+          });
+        }
+        steps.push({ label: 'Summary', team: 'synthesis', status: isSynthesis ? 'active' : 'pending' });
+
+        // Weighted progress: each phase = 1 unit; within active phase, subdivide by agents done
+        const totalUnits = steps.length;
+        const doneUnits  = steps.filter(s => s.status === 'done').length;
+        const activeUnit = totalAgents > 0 && !isSynthesis ? doneAgents / totalAgents : isSynthesis ? 0.5 : 0;
+        const pct        = Math.min(99, Math.round(((doneUnits + activeUnit) / totalUnits) * 100));
+
+        const elapsedStr = elapsedSecs >= 60
+          ? `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s`
+          : `${elapsedSecs}s`;
+
         return (
           <Card className="overflow-hidden border-primary/20">
             {/* Header */}
@@ -885,65 +925,104 @@ export default function SessionDetail() {
               <div className="flex items-center gap-2.5">
                 <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
                 <span className="text-sm font-semibold">
-                  {isSynthesis
-                    ? 'Synthesizing analysis…'
-                    : runningAgents
-                      ? `Round ${runningAgents.round} of ${runningAgents.roundCount}`
-                      : runningStep}
+                  {isSynthesis ? 'Generating final analysis…'
+                    : currentRound ? `Round ${currentRound} of ${roundCount} — ${currentPhase === 'red' ? 'Red team analyzing' : 'Blue team responding'}`
+                    : runningStep}
                 </span>
               </div>
-              {runningAgents && !isSynthesis && (
-                <Badge variant="outline" className={cn(
-                  "text-xs",
-                  runningAgents.phase === 'red'
-                    ? "border-red-team/40 text-red-team bg-red-team/5"
-                    : "border-blue-team/40 text-blue-team bg-blue-team/5"
-                )}>
-                  {runningAgents.phase === 'red' ? 'Red Phase' : 'Blue Phase'}
-                </Badge>
+              {elapsedSecs > 0 && (
+                <span className="text-xs text-muted-foreground tabular-nums flex-shrink-0">{elapsedStr}</span>
               )}
+            </div>
+
+            {/* Step pipeline */}
+            <div className="px-5 pt-4 pb-1 overflow-x-auto">
+              <div className="flex items-center min-w-max">
+                {steps.map((step, i) => {
+                  const isRed  = step.team === 'red';
+                  const isBlue = step.team === 'blue';
+                  const activeColor = isRed ? 'text-red-team' : isBlue ? 'text-blue-team' : 'text-primary';
+                  const activeBg   = isRed ? 'bg-red-team/10 ring-1 ring-red-team/40' : isBlue ? 'bg-blue-team/10 ring-1 ring-blue-team/40' : 'bg-primary/10 ring-1 ring-primary/40';
+                  return (
+                    <React.Fragment key={i}>
+                      <div className="flex flex-col items-center gap-1">
+                        <div className={cn(
+                          "w-7 h-7 rounded-full flex items-center justify-center transition-all",
+                          step.status === 'done'    && "bg-green-team/15",
+                          step.status === 'active'  && activeBg,
+                          step.status === 'pending' && "bg-muted/60",
+                        )}>
+                          {step.status === 'done'
+                            ? <CheckCircle2 className="w-3.5 h-3.5 text-green-team" />
+                            : step.status === 'active'
+                              ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin", activeColor)} />
+                              : <Circle className="w-3.5 h-3.5 text-muted-foreground/25" />
+                          }
+                        </div>
+                        <span className={cn(
+                          "text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap",
+                          step.status === 'done'    && "text-green-team/80",
+                          step.status === 'active'  && activeColor,
+                          step.status === 'pending' && "text-muted-foreground/30",
+                        )}>{step.label}</span>
+                      </div>
+                      {i < steps.length - 1 && (
+                        <div className={cn(
+                          "h-px w-6 mx-1 mb-4 flex-shrink-0 transition-colors",
+                          steps[i + 1].status !== 'pending' || step.status === 'done' ? "bg-green-team/40" : "bg-muted"
+                        )} />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Per-agent rows */}
             {runningAgents && !isSynthesis && (
-              <div className="px-5 py-3 space-y-3">
+              <div className="px-5 py-3 border-t border-border/40 space-y-3">
                 {['red', 'blue'].map(team => {
                   const teamAgents = runningAgents.agents.filter(a => a.team === team);
                   if (!teamAgents.length) return null;
                   const isRed = team === 'red';
-                  const isActiveTeam = runningAgents.phase === team;
+                  const isActiveTeam = currentPhase === team;
                   return (
                     <div key={team}>
                       <div className={cn(
-                        "text-[10px] font-semibold uppercase tracking-wider mb-1.5",
+                        "text-[10px] font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-1.5",
                         isRed ? "text-red-team/70" : "text-blue-team/70"
                       )}>
                         {isRed ? 'Red Team' : 'Blue Team'}
+                        {isActiveTeam && <span className={cn(
+                          "text-[9px] px-1.5 py-px rounded font-normal normal-case tracking-normal",
+                          isRed ? "bg-red-team/10 text-red-team" : "bg-blue-team/10 text-blue-team"
+                        )}>active</span>}
                       </div>
                       <div className="space-y-0.5">
                         {teamAgents.map(agent => (
                           <div key={agent.id} className={cn(
-                            "flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors",
+                            "flex items-center gap-2.5 px-3 py-2 rounded-md transition-colors",
                             agent.status === 'running' && (isRed ? "bg-red-team/5" : "bg-blue-team/5")
                           )}>
                             {agent.status === 'done'
                               ? <CheckCircle2 className={cn("w-3.5 h-3.5 flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
                               : agent.status === 'running'
                                 ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
-                                : <Circle className={cn("w-3.5 h-3.5 flex-shrink-0", isActiveTeam ? "text-muted-foreground/50" : "text-muted-foreground/20")} />
+                                : <Circle className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/25" />
                             }
                             <span className={cn(
-                              "text-xs font-medium flex-1",
-                              agent.status === 'done' ? (isRed ? "text-red-team" : "text-blue-team") :
-                              agent.status === 'running' ? "text-foreground" :
-                              isActiveTeam ? "text-muted-foreground" : "text-muted-foreground/40"
-                            )}>
-                              {agent.name}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground w-20 text-right">
-                              {agent.status === 'running' ? (isRed ? 'analyzing…' : 'responding…') :
-                               agent.status === 'done' ? 'complete' : ''}
-                            </span>
+                              "text-xs font-medium flex-1 min-w-0 truncate",
+                              agent.status === 'done'    ? (isRed ? "text-red-team/80"  : "text-blue-team/80") :
+                              agent.status === 'running' ? "text-foreground" : "text-muted-foreground/35"
+                            )}>{agent.name}</span>
+                            {agent.status === 'running' && (
+                              <span className={cn("text-[10px] flex-shrink-0", isRed ? "text-red-team/60" : "text-blue-team/60")}>
+                                {isRed ? 'analyzing threat…' : 'formulating response…'}
+                              </span>
+                            )}
+                            {agent.status === 'done' && (
+                              <span className="text-[10px] text-muted-foreground flex-shrink-0">done</span>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -953,52 +1032,32 @@ export default function SessionDetail() {
               </div>
             )}
 
-            {/* Synthesis state */}
+            {/* Synthesis */}
             {isSynthesis && (
-              <div className="px-5 py-4 flex items-center gap-3 text-sm text-muted-foreground">
+              <div className="px-5 py-4 border-t border-border/40 flex items-center gap-3 text-sm text-muted-foreground">
                 <div className="flex gap-1 flex-shrink-0">
-                  {[0, 150, 300].map((delay) => (
-                    <div key={delay} className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${delay}ms` }} />
+                  {[0, 150, 300].map(d => (
+                    <div key={d} className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${d}ms` }} />
                   ))}
                 </div>
                 Generating executive summary, risk registry &amp; attack chains…
               </div>
             )}
 
-            {/* Completed rounds summary */}
-            {prevDone.length > 0 && (
-              <div className="border-t border-border/50 px-5 py-2 space-y-0.5 bg-muted/20">
-                {prevDone.map(rd => {
-                  const nr = normalizeRound(rd);
-                  const rNames = nr.red_responses.map(x => x.agent_name).filter(Boolean).join(', ');
-                  const bNames = nr.blue_responses.map(x => x.agent_name).filter(Boolean).join(', ');
-                  return (
-                    <div key={rd.round_number} className="flex items-center gap-2 text-xs text-muted-foreground py-0.5">
-                      <CheckCircle2 className="w-3 h-3 text-green-team flex-shrink-0" />
-                      <span className="text-green-team font-medium">Round {rd.round_number}</span>
-                      <span>complete</span>
-                      {rNames && bNames && (
-                        <span className="ml-1">— <span className="text-red-team">{rNames}</span> <span className="text-muted-foreground/50">·</span> <span className="text-blue-team">{bNames}</span></span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Progress footer */}
-            <div className="border-t border-border/50 px-5 py-3">
+            {/* Progress bar */}
+            <div className="px-5 pb-4 pt-3 border-t border-border/40">
               <div className="flex justify-between text-[10px] text-muted-foreground mb-1.5">
-                <span>{completedRounds} of {roundCount} rounds complete</span>
-                {!isSynthesis && totalAgents > 0 && (
-                  <span>{doneAgents} / {totalAgents} agents done this round</span>
-                )}
-                {isSynthesis && <span>Finalising…</span>}
+                <span>
+                  {isSynthesis ? 'Finalising analysis…'
+                    : completedRounds > 0 ? `${completedRounds} of ${roundCount} rounds complete`
+                    : 'Starting…'}
+                </span>
+                <span className="tabular-nums font-medium">{pct}%</span>
               </div>
               <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary rounded-full transition-all duration-700"
-                  style={{ width: `${isSynthesis ? 90 : roundPct}%` }}
+                  style={{ width: `${pct}%` }}
                 />
               </div>
             </div>
