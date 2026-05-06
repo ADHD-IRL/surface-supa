@@ -65,13 +65,7 @@ export default function SessionsList({ sessions, onDelete, deletingId }) {
                     <span className="text-xs text-muted-foreground">
                       {format(new Date(session.created_date), 'MMM d, yyyy')}
                     </span>
-                    {session.domain_focus?.length > 0 && (
-                      <div className="flex gap-1">
-                        {session.domain_focus.slice(0, 3).map((d) => (
-                          <span key={d} className="text-xs px-1.5 py-0.5 bg-muted rounded text-muted-foreground">{d}</span>
-                        ))}
-                      </div>
-                    )}
+
                     {session.risk_registry?.length > 0 && (
                       <span className="text-xs text-red-team font-medium">{session.risk_registry.length} risks</span>
                     )}

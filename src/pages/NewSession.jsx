@@ -15,8 +15,6 @@ import { resolveAgent } from '@/lib/agentData';
 import { Plus, X, Upload, ArrowRight, Link2, GitBranch, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const DOMAINS = ['cyber', 'geopolitical', 'financial', 'operational', 'strategic'];
-
 export default function NewSession() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -29,7 +27,6 @@ export default function NewSession() {
     file_urls:      template?.file_urls      || [],
     mode:           template?.mode           || 'standard',
     selected_agents:template?.selected_agents|| [],
-    domain_focus:   template?.domain_focus   || [],
   });
   const [urlInput, setUrlInput] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -85,14 +82,6 @@ export default function NewSession() {
   const toggleDomainOpen = (key) =>
     setOpenDomains(prev => ({ ...prev, [key]: !prev[key] }));
 
-  const toggleDomain = (domain) => {
-    setForm(f => ({
-      ...f,
-      domain_focus: f.domain_focus.includes(domain)
-        ? f.domain_focus.filter(d => d !== domain)
-        : [...f.domain_focus, domain],
-    }));
-  };
 
   // Mirror AgentManager: use fetched Domain entities when available,
   // otherwise derive from agent.domain_id strings directly.
@@ -217,26 +206,6 @@ export default function NewSession() {
           />
         </div>
 
-        {/* Domain Focus */}
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Domain Focus</Label>
-          <div className="flex flex-wrap gap-2">
-            {DOMAINS.map(domain => (
-              <button
-                key={domain}
-                onClick={() => toggleDomain(domain)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-medium capitalize border transition-colors",
-                  form.domain_focus.includes(domain)
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-muted text-muted-foreground border-border hover:border-primary/30"
-                )}
-              >
-                {domain}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Mode */}
         <div className="space-y-2">
