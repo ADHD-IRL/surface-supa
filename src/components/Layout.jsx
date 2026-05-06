@@ -33,7 +33,7 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside
-        style={{ background: 'linear-gradient(to right, hsl(217,50%,14%), hsl(215,32%,8%))' }}
+        style={{ background: 'linear-gradient(to right, hsla(217, 51%, 35%, 1.00), hsl(215,32%,8%))' }}
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border transition-all duration-300",
           collapsed ? "w-16" : "w-60",
