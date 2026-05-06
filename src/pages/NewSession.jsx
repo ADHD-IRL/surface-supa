@@ -40,7 +40,9 @@ export default function NewSession() {
 
   const { data: domains = [] } = useQuery({
     queryKey: ['domains'],
-    queryFn: () => base44.entities.Domain.list(),
+    queryFn: async () => {
+      try { return await base44.entities.Domain.list(); } catch { return []; }
+    },
   });
 
   const createMutation = useMutation({
