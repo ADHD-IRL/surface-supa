@@ -20,7 +20,7 @@ function ThinkingDots({ color }) {
 
 function normalizeRound(round) {
   if (!round) return round;
-  if (round.red_responses) return round;
+  if ('red_responses' in round) return round;
   return {
     ...round,
     red_responses: round.red_response
