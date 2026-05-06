@@ -20,7 +20,13 @@ function ThinkingDots({ color }) {
 
 function normalizeRound(round) {
   if (!round) return round;
-  if ('red_responses' in round) return round;
+  if ('red_responses' in round) {
+    return {
+      ...round,
+      red_responses:  Array.isArray(round.red_responses)  ? round.red_responses  : [],
+      blue_responses: Array.isArray(round.blue_responses) ? round.blue_responses : [],
+    };
+  }
   return {
     ...round,
     red_responses: round.red_response
@@ -55,7 +61,7 @@ export default function DebateRound({ round, index, total }) {
       isThinking: false, waitingLabel: '',
     })),
     ...(blueThinking ? [{ team: 'blue', label: 'Blue Team', agentName: '', response: null, isThinking: true, waitingLabel: 'Responding...' }] : []),
-    ...(red_responses.length === 0 && blue_responses.length === 0 && !isRunning ? [
+    ...(red_responses.length === 0 && blue_responses.length === 0 && !isRunning && !isCompleted ? [
       { team: 'red',  label: 'Red Team',  agentName: '', response: null, isThinking: false, waitingLabel: 'Awaiting red team analysis...' },
       { team: 'blue', label: 'Blue Team', agentName: '', response: null, isThinking: false, waitingLabel: 'Waiting for red team to finish...' },
     ] : []),
