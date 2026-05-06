@@ -40,6 +40,7 @@ export default function SessionDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [runningStep, setRunningStep] = useState('');
+  const [runningAgents, setRunningAgents] = useState(null);
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
 
   const deleteMutation = useMutation({
@@ -91,6 +92,15 @@ export default function SessionDetail() {
         };
         rounds.push(roundData);
 
+        setRunningStep(`Round ${r + 1} of ${roundCount}`);
+        setRunningAgents({
+          round: r + 1, roundCount, phase: 'red',
+          agents: [
+            ...redAgents.map(a => ({ id: a.id, name: a.name, team: 'red', status: 'waiting' })),
+            ...blueAgents.map(a => ({ id: a.id, name: a.name, team: 'blue', status: 'waiting' })),
+          ],
+        });
+
         const previousContext = rounds.slice(0, -1).map(rd =>
           `Round ${rd.round_number}:\n` +
           rd.red_responses.map(x => `Red (${x.agent_name}): ${x.response}`).join('\n') + '\n' +
@@ -98,21 +108,24 @@ export default function SessionDetail() {
         ).join('\n\n');
 
         for (const redAgent of redAgents) {
-          setRunningStep(`Round ${r + 1}: ${redAgent.name} (Red) analyzing...`);
+          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === redAgent.id ? { ...a, status: 'running' } : a) }));
           const redPrompt = `${buildAgentSystemPrompt(redAgent)}\n\nScenario: ${session.scenario}\n${session.reference_urls?.length ? `\nReference URLs: ${session.reference_urls.join(', ')}` : ''}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your Round ${r + 1} attack analysis. Identify specific threats, vulnerabilities, and attack chains. Be detailed and actionable.`;
           const response = await base44.integrations.Core.InvokeLLM({ prompt: redPrompt });
           roundData.red_responses.push({ agent_id: redAgent.id, agent_name: redAgent.name, response });
+          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === redAgent.id ? { ...a, status: 'done' } : a) }));
           await base44.entities.Session.update(id, { rounds: [...rounds] });
           queryClient.invalidateQueries({ queryKey: ['session', id] });
         }
 
+        setRunningAgents(prev => prev && ({ ...prev, phase: 'blue' }));
         const allRedContext = roundData.red_responses.map(x => `${x.agent_name}:\n${x.response}`).join('\n\n---\n\n');
 
         for (const blueAgent of blueAgents) {
-          setRunningStep(`Round ${r + 1}: ${blueAgent.name} (Blue) responding...`);
+          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === blueAgent.id ? { ...a, status: 'running' } : a) }));
           const bluePrompt = `${buildAgentSystemPrompt(blueAgent)}\n\nScenario: ${session.scenario}\n\nRed team attack analyses (Round ${r + 1}):\n${allRedContext}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your defensive response. Counter each attack vector with specific mitigations, detection methods, and resilience measures. Be practical and implementable.`;
           const response = await base44.integrations.Core.InvokeLLM({ prompt: bluePrompt });
           roundData.blue_responses.push({ agent_id: blueAgent.id, agent_name: blueAgent.name, response });
+          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === blueAgent.id ? { ...a, status: 'done' } : a) }));
           await base44.entities.Session.update(id, { rounds: [...rounds] });
           queryClient.invalidateQueries({ queryKey: ['session', id] });
         }
@@ -123,6 +136,7 @@ export default function SessionDetail() {
       }
 
       // Generate summary, risks, chains
+      setRunningAgents(prev => prev ? { ...prev, phase: 'synthesis' } : null);
       setRunningStep('Generating executive summary & risk registry...');
 
       const allTranscripts = rounds.map(rd =>
@@ -188,11 +202,13 @@ export default function SessionDetail() {
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });
       setRunningStep('');
+      setRunningAgents(null);
     },
     onError: async () => {
       await base44.entities.Session.update(id, { status: 'failed' });
       queryClient.invalidateQueries({ queryKey: ['session', id] });
       setRunningStep('');
+      setRunningAgents(null);
     },
   });
 
