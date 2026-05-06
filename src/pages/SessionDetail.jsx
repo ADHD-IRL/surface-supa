@@ -870,80 +870,137 @@ export default function SessionDetail() {
       </div>
 
       {/* Running status */}
-      {runningStep && (() => {
+      {(runningStep || runningAgents) && (() => {
         const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
         const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
-        const pct = Math.round((completedRounds / roundCount) * 100);
-        const activeRound = session.rounds?.find(r => r.status === 'running');
-        const isAnalysis = runningStep.startsWith('Generating');
+        const isSynthesis = runningAgents?.phase === 'synthesis' || (!runningAgents && runningStep.startsWith('Generating'));
+        const doneAgents = runningAgents?.agents.filter(a => a.status === 'done').length ?? 0;
+        const totalAgents = runningAgents?.agents.length ?? 0;
+        const roundPct = Math.round((completedRounds / roundCount) * 100);
+        const prevDone = session.rounds?.filter(r => r.status === 'completed') ?? [];
         return (
-          <Card className="p-4 bg-primary/5 border-primary/20 space-y-3">
-            {/* Current step */}
-            <div className="flex items-center gap-3">
-              <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
-              <span className="text-sm font-medium">{runningStep}</span>
-            </div>
-
-            {/* Round timeline */}
-            <div className="flex flex-col gap-1.5 pl-7">
-              {Array.from({ length: roundCount }).map((_, i) => {
-                const round  = session.rounds?.[i];
-                const done   = round?.status === 'completed';
-                const active = round?.status === 'running';
-                const redDone = (round?.red_responses?.length ?? 0) > 0 || !!round?.red_response;
-                return (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    {done
-                      ? <CheckCircle2 className="w-3.5 h-3.5 text-green-team flex-shrink-0" />
-                      : active
-                        ? <Loader2 className="w-3.5 h-3.5 animate-spin text-primary flex-shrink-0" />
-                        : <Circle className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />}
-                    <span className={cn('font-medium', done && 'text-green-team', active && 'text-primary', !done && !active && 'text-muted-foreground')}>
-                      Round {i + 1} of {roundCount}
-                    </span>
-                    {done && round && (() => {
-                      const nr = normalizeRound(round);
-                      const rNames = nr.red_responses.map(x => x.agent_name).filter(Boolean).join(', ') || 'Red';
-                      const bNames = nr.blue_responses.map(x => x.agent_name).filter(Boolean).join(', ') || 'Blue';
-                      return (
-                        <span className="text-muted-foreground">
-                          — <span className="text-red-team">{rNames}</span> vs <span className="text-blue-team">{bNames}</span> · complete
-                        </span>
-                      );
-                    })()}
-                    {active && (
-                      <span className="text-muted-foreground flex items-center gap-1.5">
-                        — {redDone
-                          ? <><CheckCircle2 className="w-3 h-3 text-red-team inline" /> <span className="text-red-team">Red</span> <span className="text-muted-foreground">→</span> <Loader2 className="w-3 h-3 animate-spin text-blue-team inline" /> <span className="text-blue-team">Blue</span> responding</>
-                          : <><Loader2 className="w-3 h-3 animate-spin text-red-team inline" /> <span className="text-red-team">Red</span> analyzing</>
-                        }
-                      </span>
-                    )}
-                    {!done && !active && i > 0 && (
-                      <span className="text-muted-foreground">— pending</span>
-                    )}
-                  </div>
-                );
-              })}
-              {isAnalysis && (
-                <div className="flex items-center gap-2 text-xs mt-1">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary flex-shrink-0" />
-                  <span className="text-primary font-medium">Synthesizing risks, chains & executive summary…</span>
-                </div>
+          <Card className="overflow-hidden border-primary/20">
+            {/* Header */}
+            <div className="px-5 py-3 bg-primary/5 border-b border-primary/10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                <span className="text-sm font-semibold">
+                  {isSynthesis
+                    ? 'Synthesizing analysis…'
+                    : runningAgents
+                      ? `Round ${runningAgents.round} of ${runningAgents.roundCount}`
+                      : runningStep}
+                </span>
+              </div>
+              {runningAgents && !isSynthesis && (
+                <Badge variant="outline" className={cn(
+                  "text-xs",
+                  runningAgents.phase === 'red'
+                    ? "border-red-team/40 text-red-team bg-red-team/5"
+                    : "border-blue-team/40 text-blue-team bg-blue-team/5"
+                )}>
+                  {runningAgents.phase === 'red' ? 'Red Phase' : 'Blue Phase'}
+                </Badge>
               )}
             </div>
 
-            {/* Progress bar */}
-            <div className="pl-7">
+            {/* Per-agent rows */}
+            {runningAgents && !isSynthesis && (
+              <div className="px-5 py-3 space-y-3">
+                {['red', 'blue'].map(team => {
+                  const teamAgents = runningAgents.agents.filter(a => a.team === team);
+                  if (!teamAgents.length) return null;
+                  const isRed = team === 'red';
+                  const isActiveTeam = runningAgents.phase === team;
+                  return (
+                    <div key={team}>
+                      <div className={cn(
+                        "text-[10px] font-semibold uppercase tracking-wider mb-1.5",
+                        isRed ? "text-red-team/70" : "text-blue-team/70"
+                      )}>
+                        {isRed ? 'Red Team' : 'Blue Team'}
+                      </div>
+                      <div className="space-y-0.5">
+                        {teamAgents.map(agent => (
+                          <div key={agent.id} className={cn(
+                            "flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors",
+                            agent.status === 'running' && (isRed ? "bg-red-team/5" : "bg-blue-team/5")
+                          )}>
+                            {agent.status === 'done'
+                              ? <CheckCircle2 className={cn("w-3.5 h-3.5 flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
+                              : agent.status === 'running'
+                                ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
+                                : <Circle className={cn("w-3.5 h-3.5 flex-shrink-0", isActiveTeam ? "text-muted-foreground/50" : "text-muted-foreground/20")} />
+                            }
+                            <span className={cn(
+                              "text-xs font-medium flex-1",
+                              agent.status === 'done' ? (isRed ? "text-red-team" : "text-blue-team") :
+                              agent.status === 'running' ? "text-foreground" :
+                              isActiveTeam ? "text-muted-foreground" : "text-muted-foreground/40"
+                            )}>
+                              {agent.name}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground w-20 text-right">
+                              {agent.status === 'running' ? (isRed ? 'analyzing…' : 'responding…') :
+                               agent.status === 'done' ? 'complete' : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Synthesis state */}
+            {isSynthesis && (
+              <div className="px-5 py-4 flex items-center gap-3 text-sm text-muted-foreground">
+                <div className="flex gap-1 flex-shrink-0">
+                  {[0, 150, 300].map((delay) => (
+                    <div key={delay} className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${delay}ms` }} />
+                  ))}
+                </div>
+                Generating executive summary, risk registry &amp; attack chains…
+              </div>
+            )}
+
+            {/* Completed rounds summary */}
+            {prevDone.length > 0 && (
+              <div className="border-t border-border/50 px-5 py-2 space-y-0.5 bg-muted/20">
+                {prevDone.map(rd => {
+                  const nr = normalizeRound(rd);
+                  const rNames = nr.red_responses.map(x => x.agent_name).filter(Boolean).join(', ');
+                  const bNames = nr.blue_responses.map(x => x.agent_name).filter(Boolean).join(', ');
+                  return (
+                    <div key={rd.round_number} className="flex items-center gap-2 text-xs text-muted-foreground py-0.5">
+                      <CheckCircle2 className="w-3 h-3 text-green-team flex-shrink-0" />
+                      <span className="text-green-team font-medium">Round {rd.round_number}</span>
+                      <span>complete</span>
+                      {rNames && bNames && (
+                        <span className="ml-1">— <span className="text-red-team">{rNames}</span> <span className="text-muted-foreground/50">·</span> <span className="text-blue-team">{bNames}</span></span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Progress footer */}
+            <div className="border-t border-border/50 px-5 py-3">
+              <div className="flex justify-between text-[10px] text-muted-foreground mb-1.5">
+                <span>{completedRounds} of {roundCount} rounds complete</span>
+                {!isSynthesis && totalAgents > 0 && (
+                  <span>{doneAgents} / {totalAgents} agents done this round</span>
+                )}
+                {isSynthesis && <span>Finalising…</span>}
+              </div>
               <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-primary rounded-full transition-all duration-1000"
-                  style={{ width: `${isAnalysis ? 90 : pct}%` }}
+                  className="h-full bg-primary rounded-full transition-all duration-700"
+                  style={{ width: `${isSynthesis ? 90 : roundPct}%` }}
                 />
               </div>
-              <span className="text-[10px] text-muted-foreground mt-1 block">
-                {isAnalysis ? 'Finalising analysis…' : `${completedRounds} of ${roundCount} rounds complete`}
-              </span>
             </div>
           </Card>
         );
