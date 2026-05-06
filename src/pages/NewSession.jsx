@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { tagColor } from '@/components/agents/AgentCard';
 import { Plus, X, Upload, ArrowRight, Link2, GitBranch, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -38,11 +39,12 @@ export default function NewSession() {
     queryFn: () => base44.entities.Agent.filter({ status: 'active' }),
   });
 
-  const { data: domains = [] } = useQuery({
+  const { data: fetchedDomains = null } = useQuery({
     queryKey: ['domains'],
     queryFn: async () => {
-      try { return await base44.entities.Domain.list(); } catch { return []; }
+      try { return await base44.entities.Domain.list(); } catch { return null; }
     },
+    retry: false,
   });
 
   const createMutation = useMutation({
@@ -91,12 +93,30 @@ export default function NewSession() {
     }));
   };
 
-  const domainMap = Object.fromEntries(domains.map(d => [d.id, d]));
+  // Mirror AgentManager: use fetched Domain entities when available,
+  // otherwise derive from agent.domain_id strings directly.
+  const effectiveDomains = (() => {
+    if (fetchedDomains?.length > 0) return fetchedDomains;
+    const seen = new Set();
+    const list = [];
+    agents.forEach(a => {
+      const key = a.domain_id || a.discipline?.split(/[\/,]/)[0]?.trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        list.push({ id: key, name: key, color: tagColor(key) });
+      }
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  const domainMap = Object.fromEntries(effectiveDomains.map(d => [d.id, d]));
 
   const agentsByDomain = (() => {
     const groups = new Map();
     for (const agent of agents) {
-      const key = agent.domain_id || '__uncategorized__';
+      const key = agent.domain_id
+        || agent.discipline?.split(/[\/,]/)[0]?.trim()
+        || '__uncategorized__';
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(agent);
     }
@@ -298,7 +318,7 @@ export default function NewSession() {
             {agentsByDomain.map(([domainKey, domainAgents]) => {
               const domain = domainMap[domainKey];
               const domainName = domain?.name ?? (domainKey === '__uncategorized__' ? 'Uncategorized' : domainKey);
-              const domainColor = domain?.color ?? '#546E7A';
+              const domainColor = domain?.color ?? tagColor(domainKey);
               const selectedInDomain = domainAgents.filter(a => form.selected_agents.includes(a.id)).length;
               const allSelected = selectedInDomain === domainAgents.length;
               const isOpen = openDomains[domainKey] ?? false;
