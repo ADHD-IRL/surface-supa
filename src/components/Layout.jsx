@@ -33,7 +33,7 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300",
+        "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border transition-all duration-300 bg-gradient-to-r from-[hsl(217,50%,14%)] to-sidebar",
         collapsed ? "w-16" : "w-60",
         mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
       )}>
