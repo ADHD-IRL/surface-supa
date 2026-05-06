@@ -31,6 +31,7 @@ export default function NewSession() {
   const [urlInput, setUrlInput] = useState('');
   const [uploading, setUploading] = useState(false);
   const [openDomains, setOpenDomains] = useState({});
+  const [teamFilter, setTeamFilter] = useState('all');
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
@@ -262,35 +263,62 @@ export default function NewSession() {
 
         {/* Agent Selection */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Label className="text-sm font-semibold">Select Agents</Label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground underline"
-                onClick={() => setForm(f => ({ ...f, selected_agents: agents.map(a => a.id) }))}
-              >
-                All
-              </button>
-              <span className="text-xs text-muted-foreground">/</span>
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground underline"
-                onClick={() => setForm(f => ({ ...f, selected_agents: [] }))}
-              >
-                None
-              </button>
+            <div className="flex items-center gap-2">
+              {/* Team filter toggle */}
+              <div className="flex rounded-md border border-border overflow-hidden text-xs">
+                {[
+                  { value: 'all',  label: 'Both' },
+                  { value: 'red',  label: 'Red' },
+                  { value: 'blue', label: 'Blue' },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setTeamFilter(value)}
+                    className={cn(
+                      "px-2.5 py-1 font-medium transition-colors",
+                      teamFilter === value
+                        ? value === 'red'  ? "bg-red-500/10 text-red-500"
+                        : value === 'blue' ? "bg-blue-500/10 text-blue-500"
+                        : "bg-muted text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {/* All / None */}
+              <div className="flex gap-1.5">
+                <button type="button" className="text-xs text-muted-foreground hover:text-foreground underline"
+                  onClick={() => setForm(f => ({ ...f, selected_agents: agents.filter(a => teamFilter === 'all' || a.team === teamFilter).map(a => a.id) }))}>
+                  All
+                </button>
+                <span className="text-xs text-muted-foreground">/</span>
+                <button type="button" className="text-xs text-muted-foreground hover:text-foreground underline"
+                  onClick={() => {
+                    const visibleIds = new Set(agents.filter(a => teamFilter === 'all' || a.team === teamFilter).map(a => a.id));
+                    setForm(f => ({ ...f, selected_agents: f.selected_agents.filter(id => !visibleIds.has(id)) }));
+                  }}>
+                  None
+                </button>
+              </div>
             </div>
           </div>
           <p className="text-xs text-muted-foreground -mt-1">Leave empty to use all active agents</p>
 
           <div className="border rounded-md overflow-hidden divide-y divide-border">
             {agentsByDomain.map(([domainKey, domainAgents]) => {
+              const visibleAgents = teamFilter === 'all' ? domainAgents : domainAgents.filter(a => a.team === teamFilter);
+              if (!visibleAgents.length) return null;
+
               const domain = domainMap[domainKey];
               const domainName = domain?.name ?? (domainKey === '__uncategorized__' ? 'Uncategorized' : domainKey);
               const domainColor = domain?.color ?? tagColor(domainKey);
-              const selectedInDomain = domainAgents.filter(a => form.selected_agents.includes(a.id)).length;
-              const allSelected = selectedInDomain === domainAgents.length;
+              const selectedInDomain = visibleAgents.filter(a => form.selected_agents.includes(a.id)).length;
+              const allSelected = selectedInDomain === visibleAgents.length;
               const isOpen = openDomains[domainKey] ?? false;
 
               return (
@@ -304,7 +332,7 @@ export default function NewSession() {
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: domainColor }} />
                       <span className="text-sm font-medium flex-1 truncate">{domainName}</span>
                       <span className="text-xs text-muted-foreground flex-shrink-0">
-                        {selectedInDomain > 0 ? `${selectedInDomain}/` : ''}{domainAgents.length}
+                        {selectedInDomain > 0 ? `${selectedInDomain}/` : ''}{visibleAgents.length}
                       </span>
                       <button
                         type="button"
@@ -314,7 +342,7 @@ export default function NewSession() {
                             ? "bg-primary/10 text-primary hover:bg-primary/20"
                             : "text-muted-foreground hover:text-foreground hover:bg-muted"
                         )}
-                        onClick={(e) => { e.stopPropagation(); toggleAllInDomain(domainAgents); }}
+                        onClick={(e) => { e.stopPropagation(); toggleAllInDomain(visibleAgents); }}
                       >
                         {allSelected ? 'Deselect' : 'Select all'}
                       </button>
@@ -322,7 +350,7 @@ export default function NewSession() {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="divide-y divide-border border-t border-border">
-                      {domainAgents.map(agent => {
+                      {visibleAgents.map(agent => {
                         const isSelected = form.selected_agents.includes(agent.id);
                         const isRed = agent.team === 'red';
                         return (
@@ -344,15 +372,17 @@ export default function NewSession() {
                               {isSelected && <span className="text-white text-[8px] leading-none">✓</span>}
                             </div>
                             <span className="text-sm flex-1 truncate">{agent.name}</span>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px] px-1 py-0 capitalize flex-shrink-0",
-                                isRed ? "border-red-500/30 text-red-500" : "border-blue-500/30 text-blue-500"
-                              )}
-                            >
-                              {agent.team}
-                            </Badge>
+                            {teamFilter === 'all' && (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] px-1 py-0 capitalize flex-shrink-0",
+                                  isRed ? "border-red-500/30 text-red-500" : "border-blue-500/30 text-blue-500"
+                                )}
+                              >
+                                {agent.team}
+                              </Badge>
+                            )}
                           </button>
                         );
                       })}
