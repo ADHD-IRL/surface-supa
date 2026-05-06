@@ -32,10 +32,12 @@ export default function Layout() {
       )}
 
       {/* Sidebar */}
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border transition-all duration-300 bg-gradient-to-r from-[hsl(217,50%,14%)] to-sidebar",
-        collapsed ? "w-16" : "w-60",
-        mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+      <aside
+        style={{ background: 'linear-gradient(to right, hsl(217,50%,14%), hsl(215,32%,8%))' }}
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border transition-all duration-300",
+          collapsed ? "w-16" : "w-60",
+          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
       )}>
         {/* Logo */}
         <div className={cn("h-16 flex items-center border-b border-sidebar-border overflow-hidden", collapsed ? "justify-center px-2" : "px-0")}>
