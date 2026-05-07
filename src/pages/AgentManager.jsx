@@ -129,6 +129,7 @@ export default function AgentManager() {
 
     for (const payload of payloads) {
       await base44.entities.Agent.create(payload);
+      await new Promise(r => setTimeout(r, 300));
     }
 
     queryClient.invalidateQueries({ queryKey: ['agents'] });
