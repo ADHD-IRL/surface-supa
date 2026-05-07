@@ -54,6 +54,12 @@ function parseAgentBlock(blockLines) {
   const focus = findAndGet('Primary Focus') || findAndGet('Red Team Focus') || findAndGet('Red-Team Focus');
   if (focus) agent.focus = focus;
 
+  const teamVal = findAndGet('Team');
+  if (teamVal) {
+    const t = teamVal.trim().toLowerCase();
+    if (t === 'red' || t === 'blue') agent._team = t;
+  }
+
   const sev = findAndGet('Severity');
   if (sev) {
     const s = sev.trim().toUpperCase().replace(/[^A-Z]/g, '');
@@ -119,6 +125,8 @@ const FORMAT_EXAMPLE = `## Agent Name / Discipline
 
 **Primary Focus:** What threats or defenses this agent hunts for.
 
+**Team:** Red
+
 **Severity:** HIGH
 
 **Vectors:**
@@ -153,7 +161,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
     setParsed(agents);
     const teams = {};
     const sel = new Set();
-    agents.forEach((_, i) => { teams[i] = 'red'; sel.add(i); });
+    agents.forEach((a, i) => { teams[i] = a._team || 'red'; sel.add(i); });
     setTeamMap(teams);
     setSelected(sel);
   };
@@ -226,6 +234,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
                   <li><span className="text-primary font-mono">**Persona:**</span> — who this expert is and how they think</li>
                   <li><span className="text-primary font-mono">**Cognitive Bias:**</span> — what they systematically underweight</li>
                   <li><span className="text-primary font-mono">**Primary Focus:**</span> — what they hunt for</li>
+                  <li><span className="text-primary font-mono">**Team:**</span> — Red or Blue (defaults to Red if omitted)</li>
                   <li><span className="text-primary font-mono">**Severity:**</span> — CRITICAL / HIGH / MEDIUM / LOW</li>
                   <li><span className="text-primary font-mono">**Vectors:**</span> — Human / Technical / Physical / Futures (0–100)</li>
                   <li><span className="text-primary font-mono">**Tags:**</span> — comma-separated keyword search tags</li>
