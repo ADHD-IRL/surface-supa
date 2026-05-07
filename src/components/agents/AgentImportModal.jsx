@@ -19,7 +19,7 @@ function getSection(lines, startIdx, label) {
 function parseAgentBlock(blockLines) {
   const agent = {
     name: '', discipline: '', persona_description: '', cognitive_bias: '',
-    red_team_focus: '', professional_background: '',
+    focus: '', professional_background: '',
     severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
     domain_tags: [], expertise_level: 'Senior', reasoning_style: 'Analytical',
@@ -52,7 +52,7 @@ function parseAgentBlock(blockLines) {
   if (bias) agent.cognitive_bias = bias;
 
   const focus = findAndGet('Primary Focus') || findAndGet('Red Team Focus') || findAndGet('Red-Team Focus');
-  if (focus) agent.red_team_focus = focus;
+  if (focus) agent.focus = focus;
 
   const sev = findAndGet('Severity');
   if (sev) {

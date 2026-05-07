@@ -7,7 +7,7 @@
 
 const STRUCTURED_FIELDS = [
   'discipline', 'professional_background',
-  'persona_description', 'cognitive_bias', 'red_team_focus',
+  'persona_description', 'cognitive_bias', 'focus',
   'expertise_level', 'reasoning_style', 'severity_default',
   'vector_human', 'vector_technical', 'vector_physical', 'vector_futures',
   'domain_tags', 'domain_id',
@@ -58,7 +58,7 @@ export function buildAgentSystemPrompt(agent) {
       a.expertise_level ? `Expertise level: ${a.expertise_level}.` : '',
       a.reasoning_style ? `Reasoning style: ${a.reasoning_style}.` : '',
       a.cognitive_bias ? `\nYour cognitive bias to be aware of: ${a.cognitive_bias}` : '',
-      a.red_team_focus ? `\nYour primary focus: ${a.red_team_focus}` : '',
+      a.focus ? `\nYour primary focus: ${a.focus}` : '',
       a.severity_default ? `\nDefault severity lens: ${a.severity_default}.` : '',
     ].filter(Boolean).join('\n');
   }

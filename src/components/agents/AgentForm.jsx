@@ -97,7 +97,7 @@ function TagInput({ tags, onChange }) {
 export default function AgentForm({ agent, domains = [], onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     name: '', discipline: '', team: 'red', domain_id: '', domain_tags: [],
-    persona_description: '', cognitive_bias: '', red_team_focus: '', professional_background: '',
+    persona_description: '', cognitive_bias: '', focus: '', professional_background: '',
     expertise_level: 'Senior', reasoning_style: 'Analytical', severity_default: 'HIGH',
     vector_human: 50, vector_technical: 50, vector_physical: 30, vector_futures: 40,
     avatar_color: '', status: 'active',
@@ -114,7 +114,7 @@ export default function AgentForm({ agent, domains = [], onSave, onCancel, savin
         domain_tags:             a.domain_tags             || [],
         persona_description:     a.persona_description     || '',
         cognitive_bias:          a.cognitive_bias          || '',
-        red_team_focus:          a.red_team_focus          || '',
+        focus:                   a.focus                   || '',
         professional_background: a.professional_background || '',
         expertise_level:         a.expertise_level         || 'Senior',
         reasoning_style:         a.reasoning_style         || 'Analytical',
@@ -222,9 +222,9 @@ export default function AgentForm({ agent, domains = [], onSave, onCancel, savin
                 <TextArea value={form.cognitive_bias} onChange={v => set('cognitive_bias', v)}
                   placeholder="What this expert systematically underweights or misses…" rows={2} />
               </Field>
-              <Field label={form.team === 'red' ? 'RED TEAM FOCUS' : 'BLUE TEAM FOCUS'}>
-                <TextArea value={form.red_team_focus} onChange={v => set('red_team_focus', v)}
-                  placeholder={form.team === 'red' ? 'What this agent hunts for in any scenario…' : 'What defenses and countermeasures this agent champions…'}
+              <Field label="FOCUS">
+                <TextArea value={form.focus} onChange={v => set('focus', v)}
+                  placeholder="What this agent focuses on in any scenario…"
                   rows={2} />
               </Field>
             </div>
