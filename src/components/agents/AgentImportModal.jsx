@@ -143,7 +143,7 @@ const FORMAT_EXAMPLE = `## Agent Name / Discipline
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function AgentImportModal({ onImport, onCancel, importing }) {
+export default function AgentImportModal({ onImport, onCancel, importing, importProgress = { current: 0, total: 0 } }) {
   const [mode, setMode] = useState('file');   // 'file' | 'paste'
   const [text, setText] = useState('');
   const [parsed, setParsed] = useState(null);
@@ -433,7 +433,22 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
 
         {/* Footer */}
         {parsed && (
-          <div className="sticky bottom-0 flex justify-end gap-2 px-6 py-4 border-t border-border bg-card">
+          <div className="sticky bottom-0 border-t border-border bg-card">
+            {importing && importProgress.total > 0 && (
+              <div className="px-6 pt-3 space-y-1">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Importing agents…</span>
+                  <span>{importProgress.current} / {importProgress.total}</span>
+                </div>
+                <div className="h-1 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-200 rounded-full"
+                    style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 px-6 py-4">
             <button onClick={onCancel} className="px-4 py-2 text-sm rounded border border-border text-muted-foreground hover:text-foreground transition-colors">
               Cancel
             </button>
@@ -445,6 +460,7 @@ export default function AgentImportModal({ onImport, onCancel, importing }) {
               {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               Import {selected.size > 0 ? `${selected.size} ` : ''}Agent{selected.size !== 1 ? 's' : ''}
             </button>
+            </div>
           </div>
         )}
       </div>

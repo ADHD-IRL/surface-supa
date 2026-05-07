@@ -29,6 +29,8 @@ export default function AgentManager() {
   const [groupBy, setGroupBy]             = useState('team');
   const [bulkMode, setBulkMode]           = useState(false);
   const [selected, setSelected]           = useState(new Set());
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 });
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
@@ -86,12 +88,20 @@ export default function AgentManager() {
   });
 
   const bulkDeleteMutation = useMutation({
-    mutationFn: (ids) => Promise.all(ids.map(id => base44.entities.Agent.delete(id))),
+    mutationFn: async (ids) => {
+      setDeleteProgress({ current: 0, total: ids.length });
+      for (let i = 0; i < ids.length; i++) {
+        await base44.entities.Agent.delete(ids[i]);
+        setDeleteProgress({ current: i + 1, total: ids.length });
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
       setSelected(new Set());
       setBulkMode(false);
+      setDeleteProgress({ current: 0, total: 0 });
     },
+    onError: () => setDeleteProgress({ current: 0, total: 0 }),
   });
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -119,20 +129,45 @@ export default function AgentManager() {
   });
 
   const handleImport = async (list) => {
+    setImportProgress({ current: 0, total: list.length });
+    const uniqueNames = [...new Set(list.map(a => a._domain_name).filter(Boolean))];
+
+    const domainIdMap = {};
+    if (uniqueNames.length > 0) {
+      let currentDomains = [];
+      try { currentDomains = await base44.entities.Domain.list(); } catch { /* schema not deployed */ }
+      await Promise.all(uniqueNames.map(async (name) => {
+        const norm = name.trim().toLowerCase();
+        const existing = currentDomains.find(d => d.name.toLowerCase() === norm);
+        if (existing) {
+          domainIdMap[name] = existing.id;
+        } else {
+          try {
+            const created = await base44.entities.Domain.create({ name: name.trim(), color: tagColor(name) });
+            domainIdMap[name] = created.id;
+          } catch {
+            domainIdMap[name] = name.trim();
+          }
+        }
+      }));
+    }
+
     const payloads = list.map(a => {
       const { _domain_name, ...rest } = a;
-      const domain_id = _domain_name ? _domain_name.trim() : '';
+      const domain_id = _domain_name ? (domainIdMap[_domain_name] ?? _domain_name.trim()) : '';
       const payload = { ...rest, domain_id };
       payload.system_prompt = encodeAgentData(payload);
       return payload;
     });
 
-    for (const payload of payloads) {
-      await base44.entities.Agent.create(payload);
-      await new Promise(r => setTimeout(r, 300));
+    for (let i = 0; i < payloads.length; i++) {
+      await base44.entities.Agent.create(payloads[i]);
+      setImportProgress({ current: i + 1, total: payloads.length });
     }
 
     queryClient.invalidateQueries({ queryKey: ['agents'] });
+    queryClient.invalidateQueries({ queryKey: ['domains'] });
+    setImportProgress({ current: 0, total: 0 });
     setModal(null);
   };
 
@@ -342,7 +377,8 @@ export default function AgentManager() {
         <div className="p-6 space-y-5">
 
           {bulkMode && (
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-muted rounded border border-border">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-muted rounded border border-border">
               <button onClick={() => setSelected(new Set(agents.filter(a => !a.is_default).map(a => a.id)))}
                 className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
                 <CheckSquare className="w-3.5 h-3.5" /> All
@@ -359,7 +395,9 @@ export default function AgentManager() {
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 transition-colors"
                   >
                     {bulkDeleteMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                    Delete {deletableSelected.length > 0 ? deletableSelected.length : ''}
+                    {bulkDeleteMutation.isPending && deleteProgress.total > 0
+                      ? `${deleteProgress.current}/${deleteProgress.total}`
+                      : deletableSelected.length > 0 ? deletableSelected.length : ''}
                   </button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
@@ -376,6 +414,21 @@ export default function AgentManager() {
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
+            </div>
+            {bulkDeleteMutation.isPending && deleteProgress.total > 0 && (
+              <div className="px-4 space-y-1">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Deleting agents…</span>
+                  <span>{deleteProgress.current} / {deleteProgress.total}</span>
+                </div>
+                <div className="h-1 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-destructive transition-all duration-200 rounded-full"
+                    style={{ width: `${(deleteProgress.current / deleteProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
             </div>
           )}
 
@@ -480,7 +533,8 @@ export default function AgentManager() {
         <AgentImportModal
           onImport={handleImport}
           onCancel={() => setModal(null)}
-          importing={false}
+          importing={importProgress.total > 0}
+          importProgress={importProgress}
         />
       )}
 
