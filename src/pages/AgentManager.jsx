@@ -119,33 +119,9 @@ export default function AgentManager() {
   });
 
   const handleImport = async (list) => {
-    const uniqueNames = [...new Set(list.map(a => a._domain_name).filter(Boolean))];
-
-    // Resolve domain names → ids. Try Domain entity first; fall back to name-as-id.
-    const domainIdMap = {};
-    if (uniqueNames.length > 0) {
-      let currentDomains = [];
-      try { currentDomains = await base44.entities.Domain.list(); } catch { /* schema not deployed */ }
-      await Promise.all(uniqueNames.map(async (name) => {
-        const norm = name.trim().toLowerCase();
-        const existing = currentDomains.find(d => d.name.toLowerCase() === norm);
-        if (existing) {
-          domainIdMap[name] = existing.id;
-        } else {
-          try {
-            const created = await base44.entities.Domain.create({ name: name.trim(), color: tagColor(name) });
-            domainIdMap[name] = created.id;
-          } catch {
-            domainIdMap[name] = name.trim(); // use name directly when entity API unavailable
-          }
-        }
-      }));
-    }
-
     const payloads = list.map(a => {
-      // eslint-disable-next-line no-unused-vars
       const { _domain_name, ...rest } = a;
-      const domain_id = _domain_name ? (domainIdMap[_domain_name] ?? _domain_name.trim()) : '';
+      const domain_id = _domain_name ? _domain_name.trim() : '';
       const payload = { ...rest, domain_id };
       payload.system_prompt = encodeAgentData(payload);
       return payload;
@@ -156,7 +132,6 @@ export default function AgentManager() {
     }
 
     queryClient.invalidateQueries({ queryKey: ['agents'] });
-    queryClient.invalidateQueries({ queryKey: ['domains'] });
     setModal(null);
   };
 
