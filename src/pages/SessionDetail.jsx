@@ -154,16 +154,22 @@ export default function SessionDetail() {
         agents: agentResults.map(r => ({ id: r.agent_id, name: r.agent_name, team: r.team, r1Status: 'pending', r2Status: 'pending' })),
       });
 
-      // ── Phase 1: R1 — all agents in parallel ───────────────────────────────
+      // ── Phase 1: R1 — sequential (base44 InvokeLLM may not support concurrent calls) ──
       setRunningStep('Round 1 — Independent assessments');
-      await asyncPool(3, resolvedAgents, async (agent) => {
+      await asyncPool(1, resolvedAgents, async (agent) => {
         setRunningAgents(prev => prev && ({
           ...prev,
           agents: prev.agents.map(a => a.id === agent.id ? { ...a, r1Status: 'running' } : a),
         }));
 
-        const raw = await base44.integrations.Core.InvokeLLM({ prompt: buildR1Prompt(agent, scenarioContext) });
-        const { assessment, severity } = parseSeverityFromText(typeof raw === 'string' ? raw : String(raw));
+        let rawR1;
+        try {
+          rawR1 = await base44.integrations.Core.InvokeLLM({ prompt: buildR1Prompt(agent, scenarioContext) });
+        } catch (e) {
+          console.error(`[V2 R1] agent ${agent.name} failed:`, e);
+          rawR1 = `Assessment unavailable (LLM error).\nSEVERITY: HIGH`;
+        }
+        const { assessment, severity } = parseSeverityFromText(typeof rawR1 === 'string' ? rawR1 : String(rawR1));
 
         const idx = agentResults.findIndex(r => r.agent_id === agent.id);
         if (idx >= 0) {
@@ -183,15 +189,21 @@ export default function SessionDetail() {
       setRunningStep('Round 2 — Rebuttals');
       setRunningAgents(prev => prev && ({ ...prev, phase: 'r2' }));
 
-      await asyncPool(3, resolvedAgents, async (agent) => {
+      await asyncPool(1, resolvedAgents, async (agent) => {
         setRunningAgents(prev => prev && ({
           ...prev,
           agents: prev.agents.map(a => a.id === agent.id ? { ...a, r2Status: 'running' } : a),
         }));
 
         const othersText = formatOthersAssessments(agentResults, agent.id);
-        const raw = await base44.integrations.Core.InvokeLLM({ prompt: buildR2Prompt(agent, scenarioContext, othersText) });
-        const { assessment, severity } = parseSeverityFromText(typeof raw === 'string' ? raw : String(raw));
+        let rawR2;
+        try {
+          rawR2 = await base44.integrations.Core.InvokeLLM({ prompt: buildR2Prompt(agent, scenarioContext, othersText) });
+        } catch (e) {
+          console.error(`[V2 R2] agent ${agent.name} failed:`, e);
+          rawR2 = `Rebuttal unavailable (LLM error).\nSEVERITY: HIGH`;
+        }
+        const { assessment, severity } = parseSeverityFromText(typeof rawR2 === 'string' ? rawR2 : String(rawR2));
 
         const idx = agentResults.findIndex(r => r.agent_id === agent.id);
         if (idx >= 0) {
@@ -211,9 +223,15 @@ export default function SessionDetail() {
       setRunningStep('Generating synthesis...');
       setRunningAgents(prev => prev && ({ ...prev, phase: 'synthesis' }));
 
-      const synthRaw = await base44.integrations.Core.InvokeLLM({
-        prompt: buildSynthesisPrompt(session, agentResults, scenarioContext),
-      });
+      let synthRaw;
+      try {
+        synthRaw = await base44.integrations.Core.InvokeLLM({
+          prompt: buildSynthesisPrompt(session, agentResults, scenarioContext),
+        });
+      } catch (e) {
+        console.error('[V2 synthesis] LLM call failed:', e);
+        synthRaw = '## CONSENSUS FINDINGS\nSynthesis unavailable.\n## CONTESTED FINDINGS\n—\n## COMPOUND CHAINS\n### Chain 1\nStep 1: Analysis pending\n## BLIND SPOTS\n—\n## PRIORITY MITIGATIONS\n1. IMMEDIATE: Review agent assessments manually.\n## SHARPEST INSIGHTS\n—';
+      }
 
       const rawText = typeof synthRaw === 'string' ? synthRaw : String(synthRaw);
       const sections = extractSynthesisSections(rawText);
@@ -261,7 +279,8 @@ export default function SessionDetail() {
       setRunningAgents(null);
       setDebateStartTime(null);
     },
-    onError: async () => {
+    onError: async (err) => {
+      console.error('[V2 debate] session failed:', err);
       await base44.entities.Session.update(id, { status: 'failed' });
       queryClient.invalidateQueries({ queryKey: ['session', id] });
       setRunningStep('');
