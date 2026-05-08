@@ -1,0 +1,73 @@
+{
+  "name": "SessionSynthesis",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Reference to the parent Session entity"
+    },
+    "raw_text": {
+      "type": "string",
+      "description": "Raw synthesis output from the LLM"
+    },
+    "consensus_findings": {
+      "type": "string",
+      "description": "Points multiple agents agreed on, sorted by severity"
+    },
+    "contested_findings": {
+      "type": "string",
+      "description": "Points of significant disagreement between agents"
+    },
+    "compound_chains": {
+      "type": "array",
+      "description": "Multi-step threat sequences that emerged from agents building on each other",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step_number": { "type": "number" },
+                "step_text": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "blind_spots": {
+      "type": "string",
+      "description": "Areas or threat vectors no agent adequately covered"
+    },
+    "priority_mitigations": {
+      "type": "string",
+      "description": "Recommended immediate actions based on highest-severity findings"
+    },
+    "sharpest_insights": {
+      "type": "string",
+      "description": "The most important or surprising statements from individual agents"
+    },
+    "scrs_score": {
+      "type": "number",
+      "description": "Systemic Critical Risk Score (0-100)"
+    },
+    "scrs_breakdown": {
+      "type": "object",
+      "description": "SCRS component breakdown",
+      "properties": {
+        "baseScore": { "type": "number" },
+        "resilienceModifier": { "type": "number" },
+        "countermeasureModifier": { "type": "number" },
+        "coveragePct": { "type": "number" },
+        "totalHighSteps": { "type": "number" },
+        "coveredHighSteps": { "type": "number" },
+        "agentCount": { "type": "number" }
+      }
+    }
+  },
+  "required": ["session_id"]
+}

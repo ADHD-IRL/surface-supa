@@ -74,7 +74,15 @@
     },
     "red_team_focus": {
       "type": "string",
+      "description": "Legacy field — use 'focus' instead"
+    },
+    "focus": {
+      "type": "string",
       "description": "Primary focus: threats the agent hunts (red) or defenses championed (blue)"
+    },
+    "professional_background": {
+      "type": "string",
+      "description": "Professional background and career history"
     },
     "vector_human": {
       "type": "number",

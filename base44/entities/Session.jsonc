@@ -184,6 +184,14 @@
           "blue_response": {
             "type": "string"
           },
+          "red_responses": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "blue_responses": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
           "status": {
             "type": "string"
           },
@@ -192,6 +200,19 @@
           }
         }
       }
+    },
+    "debate_format": {
+      "type": "string",
+      "enum": ["v1", "v2"],
+      "description": "v1 = sequential red→blue rounds; v2 = parallel R1→R2→Synthesis"
+    },
+    "parent_session_id": {
+      "type": "string",
+      "description": "ID of the session this was re-run from"
+    },
+    "parent_session_title": {
+      "type": "string",
+      "description": "Title of the parent session (denormalised for display)"
     }
   },
   "required": [

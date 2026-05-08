@@ -1,0 +1,39 @@
+{
+  "name": "SessionAgent",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Reference to the parent Session entity"
+    },
+    "agent_id": {
+      "type": "string",
+      "description": "Reference to the Agent entity"
+    },
+    "round1_assessment": {
+      "type": "string",
+      "description": "Agent's Round 1 independent assessment text"
+    },
+    "round1_severity": {
+      "type": "string",
+      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+      "description": "Severity rating from Round 1"
+    },
+    "round2_rebuttal": {
+      "type": "string",
+      "description": "Agent's Round 2 rebuttal text"
+    },
+    "round2_revised_severity": {
+      "type": "string",
+      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+      "description": "Revised severity rating after reading other agents' R1s"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "generating_r1", "r1_done", "generating_r2", "complete"],
+      "default": "pending",
+      "description": "Current processing status of this agent in the debate"
+    }
+  },
+  "required": ["session_id", "agent_id"]
+}
