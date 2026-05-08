@@ -78,11 +78,56 @@ export default function SessionDetail() {
     queryFn: () => base44.entities.Agent.list(),
   });
 
-  const isV2 = session?.debate_format === 'v2';
+  // ── V2 detection + data derivation (from existing Session fields) ──────────
+  // debate_format may not be returned if schema isn't deployed yet;
+  // fall back to checking executive_summary for the _v2 JSON marker.
+  const v2SynthData = (() => {
+    try {
+      if (!session?.executive_summary?.startsWith('{"_v2"')) return null;
+      const d = JSON.parse(session.executive_summary);
+      return d._v2 ? d : null;
+    } catch { return null; }
+  })();
 
-  // V2 data lives on the Session entity itself — no separate entity queries needed
-  const sessionAgents = session?.v2_agent_results || [];
-  const sessionSynthesis = session?.v2_synthesis || null;
+  const isV2 = !!(session?.debate_format === 'v2' || v2SynthData);
+
+  // Rebuild per-agent shape from rounds[0] (R1) and rounds[1] (R2)
+  const sessionAgents = (() => {
+    if (!isV2 || !session?.rounds?.length) return [];
+    const r1 = session.rounds[0];
+    const r2 = session.rounds[1];
+    const allR2 = [...(r2?.red_responses || []), ...(r2?.blue_responses || [])];
+    return [
+      ...(r1.red_responses || []).map(r => ({ ...r, team: 'red' })),
+      ...(r1.blue_responses || []).map(r => ({ ...r, team: 'blue' })),
+    ].map(r1row => {
+      const r2row = allR2.find(r => r.agent_id === r1row.agent_id);
+      return {
+        agent_id: r1row.agent_id,
+        agent_name: r1row.agent_name,
+        team: r1row.team,
+        round1_assessment: r1row.response || '',
+        round1_severity: r1row.severity || '',
+        round2_rebuttal: r2row?.response || '',
+        round2_revised_severity: r2row?.severity || '',
+        status: r2row?.response ? 'complete' : 'r1_done',
+      };
+    });
+  })();
+
+  const sessionSynthesis = (() => {
+    if (!isV2 || !v2SynthData) return null;
+    return {
+      ...v2SynthData,
+      compound_chains: (session?.attack_chains || []).map(c => ({
+        name: c.name,
+        steps: (c.steps || []).map((s, i) => ({
+          step_number: i + 1,
+          step_text: s.description || s.label || '',
+        })),
+      })),
+    };
+  })();
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
 
@@ -120,6 +165,7 @@ export default function SessionDetail() {
         round2_revised_severity: '',
         status: 'pending',
       }));
+      let r1Round = null;
 
       // Initialise UI
       setRunningAgents({
@@ -150,8 +196,18 @@ export default function SessionDetail() {
         }));
       });
 
-      // Persist R1 results to Session
-      await base44.entities.Session.update(id, { v2_agent_results: [...agentResults] });
+      // Persist R1 results — stored as rounds[0] with red_responses/blue_responses
+      r1Round = {
+        round_number: 1,
+        red_responses: agentResults.filter(r => r.team === 'red').map(r => ({
+          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round1_assessment, severity: r.round1_severity,
+        })),
+        blue_responses: agentResults.filter(r => r.team === 'blue').map(r => ({
+          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round1_assessment, severity: r.round1_severity,
+        })),
+        status: 'r1_done',
+      };
+      await base44.entities.Session.update(id, { rounds: [r1Round] });
       queryClient.invalidateQueries({ queryKey: ['session', id] });
 
       // ── Phase 2: R2 — all agents in parallel ───────────────────────────────
@@ -180,8 +236,18 @@ export default function SessionDetail() {
         }));
       });
 
-      // Persist R2 results to Session
-      await base44.entities.Session.update(id, { v2_agent_results: [...agentResults] });
+      // Persist R1+R2 — rounds[0] stays, rounds[1] = R2 per-agent rebuttals
+      const r2Round = {
+        round_number: 2,
+        red_responses: agentResults.filter(r => r.team === 'red').map(r => ({
+          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round2_rebuttal, severity: r.round2_revised_severity,
+        })),
+        blue_responses: agentResults.filter(r => r.team === 'blue').map(r => ({
+          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round2_rebuttal, severity: r.round2_revised_severity,
+        })),
+        status: 'complete',
+      };
+      await base44.entities.Session.update(id, { rounds: [r1Round, r2Round] });
       queryClient.invalidateQueries({ queryKey: ['session', id] });
 
       // ── Phase 3: Synthesis ─────────────────────────────────────────────────
@@ -203,19 +269,33 @@ export default function SessionDetail() {
       const chainAnalyses = (sections.compound_chains || []).map(() => ({ chain_resilience: 'MEDIUM', steps: [] }));
       const { scrs, breakdown } = computeSCRS({ sessionAgents: scrsAgents, chainAnalyses, appliedCMs: [] });
 
+      // Compound chains → attack_chains (V1 field, V1-compatible shape)
+      const attackChains = (sections.compound_chains || []).map((c, i) => ({
+        id: `chain-${i + 1}`,
+        name: c.name || `Chain ${i + 1}`,
+        steps: (c.steps || []).map(s => ({
+          label: `Step ${s.step_number}`,
+          description: s.step_text || '',
+          type: 'attack',
+        })),
+      }));
+
+      // Synthesis sections → executive_summary as JSON (marker: _v2:true)
+      const synthJson = JSON.stringify({
+        _v2: true,
+        consensus_findings: sections.consensus_findings || '',
+        contested_findings: sections.contested_findings || '',
+        blind_spots: sections.blind_spots || '',
+        priority_mitigations: sections.priority_mitigations || '',
+        sharpest_insights: sections.sharpest_insights || '',
+        scrs_score: scrs,
+        scrs_breakdown: breakdown,
+      });
+
       await base44.entities.Session.update(id, {
         status: 'completed',
-        v2_synthesis: {
-          raw_text: rawText,
-          consensus_findings: sections.consensus_findings || '',
-          contested_findings: sections.contested_findings || '',
-          compound_chains: sections.compound_chains || [],
-          blind_spots: sections.blind_spots || '',
-          priority_mitigations: sections.priority_mitigations || '',
-          sharpest_insights: sections.sharpest_insights || '',
-          scrs_score: scrs,
-          scrs_breakdown: breakdown,
-        },
+        executive_summary: synthJson,
+        attack_chains: attackChains,
       });
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });
