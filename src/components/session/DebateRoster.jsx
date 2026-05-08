@@ -53,13 +53,14 @@ function normalizeRound(round) {
   };
 }
 
-export default function DebateRoster({ session, agents }) {
-  const roundCount     = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
+export default function DebateRoster({ session, agents, sessionAgents }) {
+  const isV2           = session.debate_format === 'v2';
+  const roundCount     = isV2 ? 2 : (session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2);
   const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
   const isRunning      = session.status === 'running';
   const isCompleted    = session.status === 'completed';
 
-  // Collect all agent IDs that actually responded across all rounds
+  // Collect all agent IDs that actually responded across all rounds (V1)
   const activeRedIds = new Set(
     session.rounds?.flatMap(r => normalizeRound(r)?.red_responses?.map(x => x.agent_id) ?? []) ?? []
   );
@@ -77,13 +78,41 @@ export default function DebateRoster({ session, agents }) {
   const noRed  = eligibleRed.length  === 0;
   const noBlue = eligibleBlue.length === 0;
 
-  // Pre-start: no rounds have run yet
+  // Pre-start: no rounds have run yet (V1)
   const hasStarted = activeRedIds.size > 0 || activeBlueIds.size > 0;
 
   // Excluded: agents that exist but were not in this session's selection
   const excluded = session.selected_agents?.length
     ? agents.filter(a => !session.selected_agents.includes(a.id))
     : [];
+
+  // V2 status pills
+  function V2StatusPills({ agentId }) {
+    const sa = sessionAgents?.find(s => s.agent_id === agentId);
+    if (!sa) return null;
+    const r1Done = sa.status === 'r1_done' || sa.status === 'generating_r2' || sa.status === 'complete';
+    const r2Done = sa.status === 'complete';
+    const r1Active = sa.status === 'generating_r1';
+    const r2Active = sa.status === 'generating_r2';
+    return (
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium',
+          r1Done   ? 'bg-green-team/10 text-green-team' :
+          r1Active ? 'bg-amber-500/10 text-amber-600' :
+                     'bg-muted text-muted-foreground/50'
+        )}>
+          R1{r1Done ? ' ✓' : r1Active ? ' …' : ''}
+        </span>
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium',
+          r2Done   ? 'bg-green-team/10 text-green-team' :
+          r2Active ? 'bg-amber-500/10 text-amber-600' :
+                     'bg-muted text-muted-foreground/50'
+        )}>
+          R2{r2Done ? ' ✓' : r2Active ? ' …' : ''}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <Card className="p-4">
@@ -95,6 +124,7 @@ export default function DebateRoster({ session, agents }) {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="capitalize">{session.mode || 'standard'} mode</span>
+          {isV2 && <><span>·</span><span className="text-primary font-medium">V2</span></>}
           <span>·</span>
           <span>{roundCount} round{roundCount !== 1 ? 's' : ''}</span>
           {isCompleted && <CheckCircle2 className="w-3.5 h-3.5 text-green-team ml-1" />}
@@ -107,23 +137,19 @@ export default function DebateRoster({ session, agents }) {
         {/* ── Participating / Assigned ── */}
         <div className="mb-2">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-            {hasStarted ? 'Participating' : 'Assigned'}
+            {hasStarted || (isV2 && sessionAgents?.length) ? 'Participating' : 'Assigned'}
           </p>
-          {eligibleRed.map(a => (
-            <AgentRow
-              key={a.id}
-              agent={a}
-              roundsDone={hasStarted ? completedRounds : undefined}
-              roundsTotal={hasStarted ? roundCount : undefined}
-            />
-          ))}
-          {eligibleBlue.map(a => (
-            <AgentRow
-              key={a.id}
-              agent={a}
-              roundsDone={hasStarted ? completedRounds : undefined}
-              roundsTotal={hasStarted ? roundCount : undefined}
-            />
+          {[...eligibleRed, ...eligibleBlue].map(a => (
+            <div key={a.id} className="flex items-center">
+              <div className="flex-1 min-w-0">
+                <AgentRow
+                  agent={a}
+                  roundsDone={!isV2 && hasStarted ? completedRounds : undefined}
+                  roundsTotal={!isV2 && hasStarted ? roundCount : undefined}
+                />
+              </div>
+              {isV2 && <V2StatusPills agentId={a.id} />}
+            </div>
           ))}
           {noRed && (
             <div className="flex items-center gap-2 py-1.5">

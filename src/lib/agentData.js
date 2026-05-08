@@ -64,3 +64,188 @@ export function buildAgentSystemPrompt(agent) {
   }
   return a.system_prompt || '';
 }
+
+// ── V2 Debate prompt builders ─────────────────────────────────────────────────
+
+function agentHeader(agent) {
+  const a = resolveAgent(agent);
+  const roleLabel = a.team === 'red'
+    ? 'Red Team Analyst — your primary lens is offensive threat identification, attack vectors, and exploitation paths.'
+    : 'Blue Team Analyst — your primary lens is defensive exposure, detection gaps, and systemic resilience failures.';
+  return [
+    `You are ${a.name}${a.discipline ? `, ${a.discipline}` : ''}.`,
+    a.persona_description || '',
+    a.professional_background ? `Professional background: ${a.professional_background}` : '',
+    a.expertise_level ? `Expertise level: ${a.expertise_level}` : '',
+    a.reasoning_style ? `Reasoning style: ${a.reasoning_style} — let this shape your argumentation and tone.` : '',
+    a.cognitive_bias ? `Your cognitive bias: ${a.cognitive_bias}` : '',
+    a.focus ? `Your focus: ${a.focus}` : '',
+    `Your role: ${roleLabel}`,
+  ].filter(Boolean).join('\n');
+}
+
+export function buildR1Prompt(agent, scenarioContext) {
+  return `${agentHeader(agent)}
+
+SCENARIO CONTEXT:
+${scenarioContext}
+
+Write a Round 1 independent assessment (350-500 words) covering:
+1. Opening position — your primary framing from your discipline
+2. Top threat — specific mechanism, what analysts are missing, severity rationale
+3. Second threat — same structure
+4. Invalidating assumption — one assumption that if wrong changes your whole assessment
+5. Key finding — one-sentence bottom line
+
+Write in first person as the expert. Be specific and opinionated. Do not hedge.
+
+On the very last line of your response output exactly:
+SEVERITY: [CRITICAL|HIGH|MEDIUM|LOW]`;
+}
+
+export function buildR2Prompt(agent, scenarioContext, othersAssessments) {
+  return `${agentHeader(agent)}
+
+You have just read all Round 1 assessments from the other experts. Here they are:
+
+${othersAssessments}
+
+Write your Round 2 rebuttal (250-400 words) covering:
+1. Strongest alliance — which agent's findings amplify yours most, and the compound threat chain that emerges (name them explicitly)
+2. Strongest disagreement — which agent you most disagree with and exactly why (name them, cite their argument)
+3. Whether you've revised your severity rating and why
+
+Be direct. Name names. Change your position if persuaded.
+
+On the very last line of your response output exactly:
+SEVERITY: [CRITICAL|HIGH|MEDIUM|LOW]`;
+}
+
+export function buildSynthesisPrompt(session, agentRows, scenarioContext) {
+  const agentsText = agentRows.map(row => {
+    const r1 = row.round1_assessment ? row.round1_assessment.slice(0, 500) : '(not available)';
+    const r2 = row.round2_rebuttal ? row.round2_rebuttal.slice(0, 400) : '(not available)';
+    const teamLabel = row.team === 'red' ? 'Red Team' : 'Blue Team';
+    return `=== ${row.agent_name} (${row.discipline || teamLabel}) ===\nROUND 1 [${row.round1_severity || '?'}]:\n${r1}\n\nROUND 2 [${row.round2_revised_severity || '?'}]:\n${r2}`;
+  }).join('\n\n---\n\n');
+
+  return `You are the synthesis engine for a structured adversarial analysis session.
+
+Session: ${session.title}
+
+Scenario:
+${(scenarioContext || '').slice(0, 1500)}
+
+ALL AGENT ASSESSMENTS:
+${agentsText}
+
+Generate a comprehensive synthesis report. Use exactly these ## headings in order:
+
+## CONSENSUS FINDINGS
+Points that multiple agents agreed on. Sort by severity. Cite agents by name.
+
+## CONTESTED FINDINGS
+Points of significant disagreement. Format each as: "Agent A vs Agent B: [the disagreement]"
+
+## COMPOUND CHAINS
+Multi-step threat sequences that emerged from agents building on each other. Format each chain exactly as:
+### [Chain Name]
+Step 1: [description]
+Step 2: [description]
+Step 3: [description]
+List 2-4 chains. Each must have at least 3 steps.
+
+## BLIND SPOTS
+Areas or threat vectors that no agent adequately covered.
+
+## PRIORITY MITIGATIONS
+Numbered list of recommended immediate actions based on highest-severity consensus findings. Label each: IMMEDIATE, SHORT-TERM, or LONG-TERM.
+
+## SHARPEST INSIGHTS
+The 5 most important or surprising specific statements from individual agents. Format each as: "Agent Name — [the insight]"
+
+Write analytically. Be specific. Cite agents by name throughout.`;
+}
+
+export function parseSeverityFromText(text, fallback = 'HIGH') {
+  if (!text) return { assessment: '', severity: fallback };
+  const lines = text.trimEnd().split('\n');
+  const last = lines[lines.length - 1].trim();
+  const m = last.match(/^SEVERITY:\s*(CRITICAL|HIGH|MEDIUM|LOW)$/i);
+  if (m) {
+    return {
+      assessment: lines.slice(0, -1).join('\n').trimEnd(),
+      severity: m[1].toUpperCase(),
+    };
+  }
+  // Search last 3 lines as fallback
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 3); i--) {
+    const m2 = lines[i].match(/SEVERITY:\s*(CRITICAL|HIGH|MEDIUM|LOW)/i);
+    if (m2) {
+      return { assessment: text, severity: m2[1].toUpperCase() };
+    }
+  }
+  return { assessment: text, severity: fallback };
+}
+
+export function formatOthersAssessments(agentRows, excludeAgentId) {
+  return agentRows
+    .filter(row => row.agent_id !== excludeAgentId && row.round1_assessment)
+    .map(row => {
+      const teamLabel = row.team === 'red' ? 'Red Team' : 'Blue Team';
+      return `=== ${row.agent_name} (${row.discipline || teamLabel}) ===\n${row.round1_assessment}`;
+    })
+    .join('\n\n');
+}
+
+export function extractSynthesisSections(rawText) {
+  if (!rawText) return {};
+  const sections = {};
+  const headingRe = /^##\s+(.+)$/m;
+  const parts = rawText.split(/^##\s+/m);
+
+  const sectionNames = {
+    'CONSENSUS FINDINGS': 'consensus_findings',
+    'CONTESTED FINDINGS': 'contested_findings',
+    'COMPOUND CHAINS': 'compound_chains',
+    'BLIND SPOTS': 'blind_spots',
+    'PRIORITY MITIGATIONS': 'priority_mitigations',
+    'SHARPEST INSIGHTS': 'sharpest_insights',
+  };
+
+  for (const part of parts) {
+    const firstLine = part.split('\n')[0].trim().toUpperCase();
+    const key = Object.keys(sectionNames).find(k => firstLine.startsWith(k));
+    if (key) {
+      const body = part.slice(part.indexOf('\n') + 1).trim();
+      sections[sectionNames[key]] = body;
+    }
+  }
+
+  // Parse compound chains into structured array
+  if (sections.compound_chains) {
+    sections.compound_chains = parseCompoundChains(sections.compound_chains);
+  }
+
+  return sections;
+}
+
+function parseCompoundChains(text) {
+  const chains = [];
+  const chainBlocks = text.split(/^###\s+/m).filter(Boolean);
+  for (const block of chainBlocks) {
+    const lines = block.trim().split('\n');
+    const name = lines[0].trim();
+    const steps = [];
+    let stepNum = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const m = lines[i].match(/^Step\s+(\d+):\s*(.+)$/i);
+      if (m) {
+        stepNum++;
+        steps.push({ step_number: stepNum, step_text: m[2].trim() });
+      }
+    }
+    if (name && steps.length) chains.push({ name, description: '', steps });
+  }
+  return chains;
+}

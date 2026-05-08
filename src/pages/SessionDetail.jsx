@@ -12,14 +12,17 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2, CheckCircle2, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import DebateRound from '@/components/session/DebateRound';
+import DebateRound, { DebateRoundV2 } from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
 import ChainDiagram from '@/components/session/ChainDiagram';
 import MitigationTable from '@/components/session/MitigationTable';
 import MitigationPlaybook from '@/components/session/MitigationPlaybook';
 import DebateRoster from '@/components/session/DebateRoster';
+import SynthesisReport from '@/components/session/SynthesisReport';
 import ReactMarkdown from 'react-markdown';
-import { buildAgentSystemPrompt } from '@/lib/agentData';
+import { buildAgentSystemPrompt, buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, formatOthersAssessments, resolveAgent, extractSynthesisSections } from '@/lib/agentData';
+import { asyncPool } from '@/lib/asyncPool';
+import { computeSCRS } from '@/lib/scrsEngine';
 
 function normalizeRound(round) {
   if (!round) return round;
@@ -75,141 +78,167 @@ export default function SessionDetail() {
     queryFn: () => base44.entities.Agent.list(),
   });
 
+  const isV2 = session?.debate_format === 'v2';
+
+  const { data: sessionAgents = [] } = useQuery({
+    queryKey: ['session_agents', id],
+    queryFn: () => base44.entities.SessionAgent.filter({ session_id: id }),
+    enabled: isV2,
+    refetchInterval: session?.status === 'running' ? 2000 : false,
+  });
+
+  const { data: sessionSynthesisArr = [] } = useQuery({
+    queryKey: ['session_synthesis', id],
+    queryFn: () => base44.entities.SessionSynthesis.filter({ session_id: id }),
+    enabled: isV2 && session?.status === 'completed',
+  });
+  const sessionSynthesis = sessionSynthesisArr[0] || null;
+
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
 
   const runDebateMutation = useMutation({
     mutationFn: async () => {
       setDebateStartTime(Date.now());
-      setRunningStep('Starting debate...');
-      await base44.entities.Session.update(id, { status: 'running' });
+      setRunningStep('Starting analysis...');
 
-      const redAgents = agents.filter(a => a.team === 'red' && (session.selected_agents?.length === 0 || session.selected_agents?.includes(a.id)));
-      const blueAgents = agents.filter(a => a.team === 'blue' && (session.selected_agents?.length === 0 || session.selected_agents?.includes(a.id)));
+      // ── Phase 0: Setup ──────────────────────────────────────────────────────
+      await base44.entities.Session.update(id, { status: 'running', debate_format: 'v2' });
+      queryClient.invalidateQueries({ queryKey: ['session', id] });
 
-      if (!redAgents.length || !blueAgents.length) throw new Error('Need at least one red and one blue agent');
+      const eligible = session.selected_agents?.length
+        ? agents.filter(a => session.selected_agents.includes(a.id))
+        : agents;
 
-      const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
-      const rounds = [];
+      if (!eligible.length) throw new Error('No agents assigned to this session');
 
-      for (let r = 0; r < roundCount; r++) {
-        const roundData = {
-          round_number: r + 1,
-          red_responses: [],
-          blue_responses: [],
-          status: 'running',
-          timestamp: new Date().toISOString(),
-        };
-        rounds.push(roundData);
+      // Resolve rich fields from system_prompt JSON
+      const resolvedAgents = eligible.map(a => resolveAgent(a));
 
-        setRunningStep(`Round ${r + 1} of ${roundCount}`);
-        setRunningAgents({
-          round: r + 1, roundCount, phase: 'red',
-          agents: [
-            ...redAgents.map(a => ({ id: a.id, name: a.name, team: 'red', status: 'waiting' })),
-            ...blueAgents.map(a => ({ id: a.id, name: a.name, team: 'blue', status: 'waiting' })),
-          ],
+      // Create session_agents rows
+      await Promise.all(resolvedAgents.map(a =>
+        base44.entities.SessionAgent.create({ session_id: id, agent_id: a.id, status: 'pending' })
+      ));
+
+      // Load rows (need their IDs for updates)
+      let agentRows = await base44.entities.SessionAgent.filter({ session_id: id });
+
+      const scenarioContext = [
+        session.scenario,
+        session.reference_urls?.length ? `\nReference materials: ${session.reference_urls.join(', ')}` : '',
+      ].filter(Boolean).join('');
+
+      // Helper to enrich a row with agent metadata
+      const enrichRow = (row) => {
+        const agent = resolvedAgents.find(a => a.id === row.agent_id) || {};
+        return { ...row, agent_name: agent.name || '', discipline: agent.discipline || '', team: agent.team || 'red' };
+      };
+
+      // Set initial UI state
+      const toUiAgent = (row) => {
+        const agent = resolvedAgents.find(a => a.id === row.agent_id);
+        return { id: row.agent_id, name: agent?.name || row.agent_id, team: agent?.team || 'red', r1Status: 'pending', r2Status: 'pending' };
+      };
+      setRunningAgents({ format: 'v2', phase: 'r1', agents: agentRows.map(toUiAgent) });
+
+      // ── Phase 1: R1 — all agents in parallel ───────────────────────────────
+      setRunningStep('Round 1 — Independent assessments');
+      await asyncPool(3, agentRows, async (row) => {
+        await base44.entities.SessionAgent.update(row.id, { status: 'generating_r1' });
+        setRunningAgents(prev => prev && ({
+          ...prev,
+          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r1Status: 'running' } : a),
+        }));
+        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
+
+        const agent = resolvedAgents.find(a => a.id === row.agent_id);
+        const raw = await base44.integrations.Core.InvokeLLM({ prompt: buildR1Prompt(agent, scenarioContext) });
+        const { assessment, severity } = parseSeverityFromText(raw);
+
+        await base44.entities.SessionAgent.update(row.id, {
+          round1_assessment: assessment,
+          round1_severity: severity,
+          status: 'r1_done',
         });
-
-        const previousContext = rounds.slice(0, -1).map(rd =>
-          `Round ${rd.round_number}:\n` +
-          rd.red_responses.map(x => `Red (${x.agent_name}): ${x.response}`).join('\n') + '\n' +
-          rd.blue_responses.map(x => `Blue (${x.agent_name}): ${x.response}`).join('\n')
-        ).join('\n\n');
-
-        for (const redAgent of redAgents) {
-          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === redAgent.id ? { ...a, status: 'running' } : a) }));
-          const redPrompt = `${buildAgentSystemPrompt(redAgent)}\n\nScenario: ${session.scenario}\n${session.reference_urls?.length ? `\nReference URLs: ${session.reference_urls.join(', ')}` : ''}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your Round ${r + 1} attack analysis. Identify specific threats, vulnerabilities, and attack chains. Be detailed and actionable.`;
-          const response = await base44.integrations.Core.InvokeLLM({ prompt: redPrompt });
-          roundData.red_responses.push({ agent_id: redAgent.id, agent_name: redAgent.name, response });
-          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === redAgent.id ? { ...a, status: 'done' } : a) }));
-          await base44.entities.Session.update(id, { rounds: [...rounds] });
-          queryClient.invalidateQueries({ queryKey: ['session', id] });
-        }
-
-        setRunningAgents(prev => prev && ({ ...prev, phase: 'blue' }));
-        const allRedContext = roundData.red_responses.map(x => `${x.agent_name}:\n${x.response}`).join('\n\n---\n\n');
-
-        for (const blueAgent of blueAgents) {
-          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === blueAgent.id ? { ...a, status: 'running' } : a) }));
-          const bluePrompt = `${buildAgentSystemPrompt(blueAgent)}\n\nScenario: ${session.scenario}\n\nRed team attack analyses (Round ${r + 1}):\n${allRedContext}\n${previousContext ? `\nPrevious rounds:\n${previousContext}` : ''}\n\nProvide your defensive response. Counter each attack vector with specific mitigations, detection methods, and resilience measures. Be practical and implementable.`;
-          const response = await base44.integrations.Core.InvokeLLM({ prompt: bluePrompt });
-          roundData.blue_responses.push({ agent_id: blueAgent.id, agent_name: blueAgent.name, response });
-          setRunningAgents(prev => prev && ({ ...prev, agents: prev.agents.map(a => a.id === blueAgent.id ? { ...a, status: 'done' } : a) }));
-          await base44.entities.Session.update(id, { rounds: [...rounds] });
-          queryClient.invalidateQueries({ queryKey: ['session', id] });
-        }
-
-        roundData.status = 'completed';
-        await base44.entities.Session.update(id, { rounds: [...rounds] });
-        queryClient.invalidateQueries({ queryKey: ['session', id] });
-      }
-
-      // Generate summary, risks, chains
-      setRunningAgents(prev => prev ? { ...prev, phase: 'synthesis' } : null);
-      setRunningStep('Generating executive summary & risk registry...');
-
-      const allTranscripts = rounds.map(rd =>
-        `Round ${rd.round_number}:\n` +
-        rd.red_responses.map(x => `Red (${x.agent_name}): ${x.response}`).join('\n') + '\n' +
-        rd.blue_responses.map(x => `Blue (${x.agent_name}): ${x.response}`).join('\n')
-      ).join('\n\n---\n\n');
-
-      const analysisResult = await base44.integrations.Core.InvokeLLM({
-        prompt: `You are an expert risk analyst. Based on the following Red/Blue team adversarial debate about: "${session.scenario}"\n\nTranscripts:\n${allTranscripts}\n\nGenerate a comprehensive risk analysis output.`,
-        response_json_schema: {
-          type: 'object',
-          properties: {
-            executive_summary: { type: 'string', description: 'A concise 2-3 paragraph executive summary of key findings' },
-            risk_registry: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  title: { type: 'string' },
-                  category: { type: 'string' },
-                  likelihood: { type: 'number', description: '1-5 scale' },
-                  impact: { type: 'number', description: '1-5 scale' },
-                  description: { type: 'string' },
-                  mitigation: { type: 'string' },
-                  owner: { type: 'string' },
-                  status: { type: 'string' }
-                }
-              }
-            },
-            attack_chains: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  steps: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        label: { type: 'string' },
-                        description: { type: 'string' },
-                        type: { type: 'string', description: 'One of: initial, exploit, lateral, impact, defense' }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+        setRunningAgents(prev => prev && ({
+          ...prev,
+          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r1Status: 'done' } : a),
+        }));
+        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
       });
 
-      await base44.entities.Session.update(id, {
-        status: 'completed',
-        executive_summary: analysisResult.executive_summary,
-        risk_registry: analysisResult.risk_registry,
-        attack_chains: analysisResult.attack_chains,
+      // Reload rows with R1 data
+      agentRows = await base44.entities.SessionAgent.filter({ session_id: id });
+
+      // ── Phase 2: R2 — all agents in parallel ───────────────────────────────
+      setRunningStep('Round 2 — Rebuttals');
+      setRunningAgents(prev => prev && ({ ...prev, phase: 'r2' }));
+
+      await asyncPool(3, agentRows, async (row) => {
+        await base44.entities.SessionAgent.update(row.id, { status: 'generating_r2' });
+        setRunningAgents(prev => prev && ({
+          ...prev,
+          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r2Status: 'running' } : a),
+        }));
+        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
+
+        const agent = resolvedAgents.find(a => a.id === row.agent_id);
+        const enrichedRows = agentRows.map(enrichRow);
+        const othersText = formatOthersAssessments(enrichedRows, row.agent_id);
+        const raw = await base44.integrations.Core.InvokeLLM({ prompt: buildR2Prompt(agent, scenarioContext, othersText) });
+        const { assessment, severity } = parseSeverityFromText(raw);
+
+        await base44.entities.SessionAgent.update(row.id, {
+          round2_rebuttal: assessment,
+          round2_revised_severity: severity,
+          status: 'complete',
+        });
+        setRunningAgents(prev => prev && ({
+          ...prev,
+          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r2Status: 'done' } : a),
+        }));
+        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
       });
+
+      // Reload rows with R2 data
+      agentRows = await base44.entities.SessionAgent.filter({ session_id: id });
+
+      // ── Phase 3: Synthesis ─────────────────────────────────────────────────
+      setRunningStep('Generating synthesis...');
+      setRunningAgents(prev => prev && ({ ...prev, phase: 'synthesis' }));
+
+      const enrichedRows = agentRows.map(enrichRow);
+      const synthRaw = await base44.integrations.Core.InvokeLLM({
+        prompt: buildSynthesisPrompt(session, enrichedRows, scenarioContext),
+      });
+
+      const sections = extractSynthesisSections(typeof synthRaw === 'string' ? synthRaw : (synthRaw?.text || JSON.stringify(synthRaw)));
+
+      // SCRS: enrich sessionAgents with agent data for expertise_level
+      const scrsAgents = agentRows.map(row => ({
+        ...row,
+        agent: resolvedAgents.find(a => a.id === row.agent_id) || {},
+      }));
+      const chainAnalyses = (sections.compound_chains || []).map(() => ({ chain_resilience: 'MEDIUM', steps: [] }));
+      const { scrs, breakdown } = computeSCRS({ sessionAgents: scrsAgents, chainAnalyses, appliedCMs: [] });
+
+      await base44.entities.SessionSynthesis.create({
+        session_id: id,
+        raw_text: synthRaw,
+        consensus_findings: sections.consensus_findings || '',
+        contested_findings: sections.contested_findings || '',
+        compound_chains: sections.compound_chains || [],
+        blind_spots: sections.blind_spots || '',
+        priority_mitigations: sections.priority_mitigations || '',
+        sharpest_insights: sections.sharpest_insights || '',
+        scrs_score: scrs,
+        scrs_breakdown: breakdown,
+      });
+
+      await base44.entities.Session.update(id, { status: 'completed' });
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });
+      queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
+      queryClient.invalidateQueries({ queryKey: ['session_synthesis', id] });
       setRunningStep('');
       setRunningAgents(null);
       setDebateStartTime(null);
@@ -826,7 +855,7 @@ export default function SessionDetail() {
               <GitBranch className="w-4 h-4" /> Edit & Re-run
             </Button>
           )}
-          {session.status === 'completed' && !session.mitigation_playbook && (
+          {!isV2 && session.status === 'completed' && !session.mitigation_playbook && (
             <Button
               variant="outline"
               onClick={handleGeneratePlaybook}
@@ -839,7 +868,7 @@ export default function SessionDetail() {
               {generatingPlaybook ? 'Generating...' : 'Generate Playbook'}
             </Button>
           )}
-          {session.status === 'completed' && (
+          {!isV2 && session.status === 'completed' && (
             <Button variant="outline" onClick={handleExportPDF} className="gap-2">
               <FileDown className="w-4 h-4" /> Export PDF
             </Button>
@@ -882,45 +911,167 @@ export default function SessionDetail() {
 
       {/* Running status */}
       {(runningStep || runningAgents) && (() => {
+        const isV2Run    = runningAgents?.format === 'v2';
+        const isSynthesis = runningAgents?.phase === 'synthesis' || (!runningAgents && runningStep.startsWith('Generating'));
+        const elapsedStr = elapsedSecs >= 60
+          ? `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s`
+          : `${elapsedSecs}s`;
+
+        if (isV2Run) {
+          // ── V2 progress UI ─────────────────────────────────────────────────
+          const phase     = runningAgents.phase; // 'r1' | 'r2' | 'synthesis'
+          const uiAgents  = runningAgents.agents || [];
+          const steps = [
+            { label: 'R1 Assessment', key: 'r1',       team: 'red'  },
+            { label: 'R2 Rebuttal',   key: 'r2',       team: 'blue' },
+            { label: 'Synthesis',     key: 'synthesis', team: 'synthesis' },
+          ].map(s => ({
+            ...s,
+            status: phase === s.key ? 'active'
+              : (s.key === 'r1' && (phase === 'r2' || phase === 'synthesis')) ? 'done'
+              : (s.key === 'r2' && phase === 'synthesis') ? 'done'
+              : 'pending',
+          }));
+
+          const doneR1 = uiAgents.filter(a => a.r1Status === 'done').length;
+          const doneR2 = uiAgents.filter(a => a.r2Status === 'done').length;
+          const total  = uiAgents.length || 1;
+          const phasePct = phase === 'r1' ? doneR1 / total
+            : phase === 'r2' ? doneR2 / total
+            : phase === 'synthesis' ? 0.5 : 0;
+          const donePhases = steps.filter(s => s.status === 'done').length;
+          const pct = Math.min(99, Math.round(((donePhases + phasePct) / steps.length) * 100));
+
+          return (
+            <Card className="overflow-hidden border-primary/20">
+              <div className="px-5 py-3 bg-primary/5 border-b border-primary/10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                  <span className="text-sm font-semibold">{runningStep}</span>
+                </div>
+                {elapsedSecs > 0 && <span className="text-xs text-muted-foreground tabular-nums flex-shrink-0">{elapsedStr}</span>}
+              </div>
+
+              {/* Phase pipeline */}
+              <div className="px-5 pt-4 pb-1 overflow-x-auto">
+                <div className="flex items-center min-w-max">
+                  {steps.map((step, i) => {
+                    const activeColor = step.team === 'red' ? 'text-red-team' : step.team === 'blue' ? 'text-blue-team' : 'text-primary';
+                    const activeBg    = step.team === 'red' ? 'bg-red-team/10 ring-1 ring-red-team/40' : step.team === 'blue' ? 'bg-blue-team/10 ring-1 ring-blue-team/40' : 'bg-primary/10 ring-1 ring-primary/40';
+                    return (
+                      <React.Fragment key={i}>
+                        <div className="flex flex-col items-center gap-1">
+                          <div className={cn("w-7 h-7 rounded-full flex items-center justify-center transition-all",
+                            step.status === 'done' && "bg-green-team/15",
+                            step.status === 'active' && activeBg,
+                            step.status === 'pending' && "bg-muted/60",
+                          )}>
+                            {step.status === 'done'
+                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-team" />
+                              : step.status === 'active'
+                                ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin", activeColor)} />
+                                : <Circle className="w-3.5 h-3.5 text-muted-foreground/25" />
+                            }
+                          </div>
+                          <span className={cn("text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap",
+                            step.status === 'done' && "text-green-team/80",
+                            step.status === 'active' && activeColor,
+                            step.status === 'pending' && "text-muted-foreground/30",
+                          )}>{step.label}</span>
+                        </div>
+                        {i < steps.length - 1 && (
+                          <div className={cn("h-px w-8 mx-1 mb-4 flex-shrink-0 transition-colors",
+                            steps[i + 1].status !== 'pending' || step.status === 'done' ? "bg-green-team/40" : "bg-muted"
+                          )} />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Per-agent status (R1 or R2 phase) */}
+              {phase !== 'synthesis' && (
+                <div className="px-5 py-3 border-t border-border/40 space-y-0.5">
+                  {uiAgents.map(agent => {
+                    const isRed    = agent.team === 'red';
+                    const status   = phase === 'r1' ? agent.r1Status : agent.r2Status;
+                    return (
+                      <div key={agent.id} className={cn("flex items-center gap-2.5 px-3 py-1.5 rounded-md",
+                        status === 'running' && (isRed ? "bg-red-team/5" : "bg-blue-team/5")
+                      )}>
+                        {status === 'done'
+                          ? <CheckCircle2 className={cn("w-3.5 h-3.5 flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
+                          : status === 'running'
+                            ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
+                            : <Circle className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/25" />
+                        }
+                        <span className={cn("text-xs font-medium flex-1 min-w-0 truncate",
+                          status === 'done'    ? (isRed ? "text-red-team/80" : "text-blue-team/80") :
+                          status === 'running' ? "text-foreground" : "text-muted-foreground/35"
+                        )}>{agent.name}</span>
+                        <span className={cn("text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 capitalize",
+                          isRed ? "text-red-team/60" : "text-blue-team/60"
+                        )}>{isRed ? 'Red' : 'Blue'}</span>
+                        {status === 'running' && (
+                          <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                            {phase === 'r1' ? 'assessing…' : 'rebutting…'}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {phase === 'synthesis' && (
+                <div className="px-5 py-4 border-t border-border/40 flex items-center gap-3 text-sm text-muted-foreground">
+                  <div className="flex gap-1 flex-shrink-0">
+                    {[0, 150, 300].map(d => (
+                      <div key={d} className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                    ))}
+                  </div>
+                  Synthesising all assessments and rebuttals…
+                </div>
+              )}
+
+              <div className="px-5 pb-4 pt-3 border-t border-border/40">
+                <div className="flex justify-between text-[10px] text-muted-foreground mb-1.5">
+                  <span>{phase === 'synthesis' ? 'Finalising…' : `${phase === 'r1' ? doneR1 : doneR2} of ${total} agents done`}</span>
+                  <span className="tabular-nums font-medium">{pct}%</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full bg-primary rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            </Card>
+          );
+        }
+
+        // ── V1 progress UI (legacy) ───────────────────────────────────────────
         const roundCount    = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
         const completedRounds = session.rounds?.filter(r => r.status === 'completed').length ?? 0;
-        const isSynthesis   = runningAgents?.phase === 'synthesis' || (!runningAgents && runningStep.startsWith('Generating'));
-        const doneAgents    = runningAgents?.agents.filter(a => a.status === 'done').length ?? 0;
-        const totalAgents   = runningAgents?.agents.length ?? 0;
+        const doneAgents    = runningAgents?.agents?.filter(a => a.status === 'done').length ?? 0;
+        const totalAgents   = runningAgents?.agents?.length ?? 0;
         const currentRound  = runningAgents?.round ?? 0;
         const currentPhase  = runningAgents?.phase ?? '';
 
-        // Build phase step pipeline
         const steps = [];
         for (let r = 1; r <= roundCount; r++) {
           const roundDone = (session.rounds?.find(rd => rd.round_number === r)?.status === 'completed') || r < currentRound;
           const isThisRound = r === currentRound;
-          steps.push({
-            label: roundCount === 1 ? 'Red' : `R${r} Red`, team: 'red',
-            status: roundDone || (isThisRound && currentPhase === 'blue') ? 'done'
-              : isThisRound && currentPhase === 'red' ? 'active' : 'pending',
-          });
-          steps.push({
-            label: roundCount === 1 ? 'Blue' : `R${r} Blue`, team: 'blue',
-            status: roundDone ? 'done'
-              : isThisRound && currentPhase === 'blue' ? 'active' : 'pending',
-          });
+          steps.push({ label: roundCount === 1 ? 'Red' : `R${r} Red`, team: 'red', status: roundDone || (isThisRound && currentPhase === 'blue') ? 'done' : isThisRound && currentPhase === 'red' ? 'active' : 'pending' });
+          steps.push({ label: roundCount === 1 ? 'Blue' : `R${r} Blue`, team: 'blue', status: roundDone ? 'done' : isThisRound && currentPhase === 'blue' ? 'active' : 'pending' });
         }
         steps.push({ label: 'Summary', team: 'synthesis', status: isSynthesis ? 'active' : 'pending' });
 
-        // Weighted progress: each phase = 1 unit; within active phase, subdivide by agents done
         const totalUnits = steps.length;
         const doneUnits  = steps.filter(s => s.status === 'done').length;
         const activeUnit = totalAgents > 0 && !isSynthesis ? doneAgents / totalAgents : isSynthesis ? 0.5 : 0;
         const pct        = Math.min(99, Math.round(((doneUnits + activeUnit) / totalUnits) * 100));
 
-        const elapsedStr = elapsedSecs >= 60
-          ? `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s`
-          : `${elapsedSecs}s`;
-
         return (
           <Card className="overflow-hidden border-primary/20">
-            {/* Header */}
             <div className="px-5 py-3 bg-primary/5 border-b border-primary/10 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
@@ -930,12 +1081,8 @@ export default function SessionDetail() {
                     : runningStep}
                 </span>
               </div>
-              {elapsedSecs > 0 && (
-                <span className="text-xs text-muted-foreground tabular-nums flex-shrink-0">{elapsedStr}</span>
-              )}
+              {elapsedSecs > 0 && <span className="text-xs text-muted-foreground tabular-nums flex-shrink-0">{elapsedStr}</span>}
             </div>
-
-            {/* Step pipeline */}
             <div className="px-5 pt-4 pb-1 overflow-x-auto">
               <div className="flex items-center min-w-max">
                 {steps.map((step, i) => {
@@ -946,39 +1093,17 @@ export default function SessionDetail() {
                   return (
                     <React.Fragment key={i}>
                       <div className="flex flex-col items-center gap-1">
-                        <div className={cn(
-                          "w-7 h-7 rounded-full flex items-center justify-center transition-all",
-                          step.status === 'done'    && "bg-green-team/15",
-                          step.status === 'active'  && activeBg,
-                          step.status === 'pending' && "bg-muted/60",
-                        )}>
-                          {step.status === 'done'
-                            ? <CheckCircle2 className="w-3.5 h-3.5 text-green-team" />
-                            : step.status === 'active'
-                              ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin", activeColor)} />
-                              : <Circle className="w-3.5 h-3.5 text-muted-foreground/25" />
-                          }
+                        <div className={cn("w-7 h-7 rounded-full flex items-center justify-center transition-all", step.status === 'done' && "bg-green-team/15", step.status === 'active' && activeBg, step.status === 'pending' && "bg-muted/60")}>
+                          {step.status === 'done' ? <CheckCircle2 className="w-3.5 h-3.5 text-green-team" /> : step.status === 'active' ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin", activeColor)} /> : <Circle className="w-3.5 h-3.5 text-muted-foreground/25" />}
                         </div>
-                        <span className={cn(
-                          "text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap",
-                          step.status === 'done'    && "text-green-team/80",
-                          step.status === 'active'  && activeColor,
-                          step.status === 'pending' && "text-muted-foreground/30",
-                        )}>{step.label}</span>
+                        <span className={cn("text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap", step.status === 'done' && "text-green-team/80", step.status === 'active' && activeColor, step.status === 'pending' && "text-muted-foreground/30")}>{step.label}</span>
                       </div>
-                      {i < steps.length - 1 && (
-                        <div className={cn(
-                          "h-px w-6 mx-1 mb-4 flex-shrink-0 transition-colors",
-                          steps[i + 1].status !== 'pending' || step.status === 'done' ? "bg-green-team/40" : "bg-muted"
-                        )} />
-                      )}
+                      {i < steps.length - 1 && <div className={cn("h-px w-6 mx-1 mb-4 flex-shrink-0 transition-colors", steps[i + 1].status !== 'pending' || step.status === 'done' ? "bg-green-team/40" : "bg-muted")} />}
                     </React.Fragment>
                   );
                 })}
               </div>
             </div>
-
-            {/* Per-agent rows */}
             {runningAgents && !isSynthesis && (
               <div className="px-5 py-3 border-t border-border/40 space-y-3">
                 {['red', 'blue'].map(team => {
@@ -988,41 +1113,17 @@ export default function SessionDetail() {
                   const isActiveTeam = currentPhase === team;
                   return (
                     <div key={team}>
-                      <div className={cn(
-                        "text-[10px] font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-1.5",
-                        isRed ? "text-red-team/70" : "text-blue-team/70"
-                      )}>
+                      <div className={cn("text-[10px] font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-1.5", isRed ? "text-red-team/70" : "text-blue-team/70")}>
                         {isRed ? 'Red Team' : 'Blue Team'}
-                        {isActiveTeam && <span className={cn(
-                          "text-[9px] px-1.5 py-px rounded font-normal normal-case tracking-normal",
-                          isRed ? "bg-red-team/10 text-red-team" : "bg-blue-team/10 text-blue-team"
-                        )}>active</span>}
+                        {isActiveTeam && <span className={cn("text-[9px] px-1.5 py-px rounded font-normal normal-case tracking-normal", isRed ? "bg-red-team/10 text-red-team" : "bg-blue-team/10 text-blue-team")}>active</span>}
                       </div>
                       <div className="space-y-0.5">
                         {teamAgents.map(agent => (
-                          <div key={agent.id} className={cn(
-                            "flex items-center gap-2.5 px-3 py-2 rounded-md transition-colors",
-                            agent.status === 'running' && (isRed ? "bg-red-team/5" : "bg-blue-team/5")
-                          )}>
-                            {agent.status === 'done'
-                              ? <CheckCircle2 className={cn("w-3.5 h-3.5 flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
-                              : agent.status === 'running'
-                                ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} />
-                                : <Circle className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/25" />
-                            }
-                            <span className={cn(
-                              "text-xs font-medium flex-1 min-w-0 truncate",
-                              agent.status === 'done'    ? (isRed ? "text-red-team/80"  : "text-blue-team/80") :
-                              agent.status === 'running' ? "text-foreground" : "text-muted-foreground/35"
-                            )}>{agent.name}</span>
-                            {agent.status === 'running' && (
-                              <span className={cn("text-[10px] flex-shrink-0", isRed ? "text-red-team/60" : "text-blue-team/60")}>
-                                {isRed ? 'analyzing threat…' : 'formulating response…'}
-                              </span>
-                            )}
-                            {agent.status === 'done' && (
-                              <span className="text-[10px] text-muted-foreground flex-shrink-0">done</span>
-                            )}
+                          <div key={agent.id} className={cn("flex items-center gap-2.5 px-3 py-2 rounded-md transition-colors", agent.status === 'running' && (isRed ? "bg-red-team/5" : "bg-blue-team/5"))}>
+                            {agent.status === 'done' ? <CheckCircle2 className={cn("w-3.5 h-3.5 flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} /> : agent.status === 'running' ? <Loader2 className={cn("w-3.5 h-3.5 animate-spin flex-shrink-0", isRed ? "text-red-team" : "text-blue-team")} /> : <Circle className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/25" />}
+                            <span className={cn("text-xs font-medium flex-1 min-w-0 truncate", agent.status === 'done' ? (isRed ? "text-red-team/80" : "text-blue-team/80") : agent.status === 'running' ? "text-foreground" : "text-muted-foreground/35")}>{agent.name}</span>
+                            {agent.status === 'running' && <span className={cn("text-[10px] flex-shrink-0", isRed ? "text-red-team/60" : "text-blue-team/60")}>{isRed ? 'analyzing threat…' : 'formulating response…'}</span>}
+                            {agent.status === 'done' && <span className="text-[10px] text-muted-foreground flex-shrink-0">done</span>}
                           </div>
                         ))}
                       </div>
@@ -1031,34 +1132,19 @@ export default function SessionDetail() {
                 })}
               </div>
             )}
-
-            {/* Synthesis */}
             {isSynthesis && (
               <div className="px-5 py-4 border-t border-border/40 flex items-center gap-3 text-sm text-muted-foreground">
-                <div className="flex gap-1 flex-shrink-0">
-                  {[0, 150, 300].map(d => (
-                    <div key={d} className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                  ))}
-                </div>
+                <div className="flex gap-1 flex-shrink-0">{[0, 150, 300].map(d => <div key={d} className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
                 Generating executive summary, risk registry &amp; attack chains…
               </div>
             )}
-
-            {/* Progress bar */}
             <div className="px-5 pb-4 pt-3 border-t border-border/40">
               <div className="flex justify-between text-[10px] text-muted-foreground mb-1.5">
-                <span>
-                  {isSynthesis ? 'Finalising analysis…'
-                    : completedRounds > 0 ? `${completedRounds} of ${roundCount} rounds complete`
-                    : 'Starting…'}
-                </span>
+                <span>{isSynthesis ? 'Finalising analysis…' : completedRounds > 0 ? `${completedRounds} of ${roundCount} rounds complete` : 'Starting…'}</span>
                 <span className="tabular-nums font-medium">{pct}%</span>
               </div>
               <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-700"
-                  style={{ width: `${pct}%` }}
-                />
+                <div className="h-full bg-primary rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
               </div>
             </div>
           </Card>
@@ -1072,9 +1158,9 @@ export default function SessionDetail() {
           {session.status === 'completed' && (
             <>
               <TabsTrigger value="report">Report</TabsTrigger>
-              <TabsTrigger value="risks">Risks</TabsTrigger>
+              <TabsTrigger value="risks">{isV2 ? 'Mitigations' : 'Risks'}</TabsTrigger>
               <TabsTrigger value="chains">Chains</TabsTrigger>
-              {session.mitigation_playbook && (
+              {!isV2 && session.mitigation_playbook && (
                 <TabsTrigger value="playbook">Playbook</TabsTrigger>
               )}
             </>
@@ -1083,107 +1169,155 @@ export default function SessionDetail() {
 
         <TabsContent value="debate" className="space-y-4 mt-4">
           {/* Roster — always shown */}
-          <DebateRoster session={session} agents={agents} />
+          <DebateRoster session={session} agents={agents} sessionAgents={isV2 ? sessionAgents : undefined} />
 
-          {session.rounds?.length > 0 ? (() => {
-            const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
-            return session.rounds.map((round, i) => (
-              <DebateRound key={i} round={round} index={i} total={roundCount} />
-            ));
-          })() : (
-            <Card className="p-12 text-center bg-card">
-              <p className="text-muted-foreground">
-                {session.status === 'draft'
-                  ? 'Click "Run Analysis" to start the adversarial debate'
-                  : 'Debate rounds will appear here once the analysis begins'}
-              </p>
-            </Card>
+          {isV2 ? (
+            sessionAgents.length > 0
+              ? <DebateRoundV2 sessionAgents={sessionAgents} agents={agents} />
+              : (
+                <Card className="p-12 text-center bg-card">
+                  <p className="text-muted-foreground">
+                    {session.status === 'draft'
+                      ? 'Click "Run Analysis" to start the adversarial debate'
+                      : 'Agent assessments will appear here once the analysis begins'}
+                  </p>
+                </Card>
+              )
+          ) : (
+            session.rounds?.length > 0 ? (() => {
+              const roundCount = session.mode === 'rapid' ? 1 : session.mode === 'deep' ? 3 : 2;
+              return session.rounds.map((round, i) => (
+                <DebateRound key={i} round={round} index={i} total={roundCount} />
+              ));
+            })() : (
+              <Card className="p-12 text-center bg-card">
+                <p className="text-muted-foreground">
+                  {session.status === 'draft'
+                    ? 'Click "Run Analysis" to start the adversarial debate'
+                    : 'Debate rounds will appear here once the analysis begins'}
+                </p>
+              </Card>
+            )
           )}
         </TabsContent>
 
         {session.status === 'completed' && (
           <>
             <TabsContent value="report" className="space-y-6 mt-4">
-              {/* Session metadata */}
-              <Card className="overflow-hidden">
-                <div className="px-6 py-3 border-b border-border bg-muted/30">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Session Details</h3>
-                </div>
-                <table className="w-full border-collapse">
-                  <tbody>
-                    {[
-                      ['Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
-                      ['Mode', (session.mode || 'standard').charAt(0).toUpperCase() + (session.mode || 'standard').slice(1)],
-                      ['Debate Rounds', String(session.rounds?.length || 0)],
-                      ['Risks Identified', String(session.risk_registry?.length || 0)],
-                      ['Attack Chains', String(session.attack_chains?.length || 0)],
-                      ['Scenario', session.scenario],
-                    ].map(([label, value], i) => (
-                      <tr key={label} className={cn("border-b border-border last:border-b-0", i % 2 === 0 ? "bg-background" : "bg-muted/10")}>
-                        <td className="px-6 py-3 w-40 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
-                        <td className="px-6 py-3 text-sm text-foreground">{value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
+              {isV2 ? (
+                <SynthesisReport synthesis={sessionSynthesis} sessionAgents={sessionAgents} agents={agents} />
+              ) : (
+                <>
+                  {/* Session metadata */}
+                  <Card className="overflow-hidden">
+                    <div className="px-6 py-3 border-b border-border bg-muted/30">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Session Details</h3>
+                    </div>
+                    <table className="w-full border-collapse">
+                      <tbody>
+                        {[
+                          ['Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
+                          ['Mode', (session.mode || 'standard').charAt(0).toUpperCase() + (session.mode || 'standard').slice(1)],
+                          ['Debate Rounds', String(session.rounds?.length || 0)],
+                          ['Risks Identified', String(session.risk_registry?.length || 0)],
+                          ['Attack Chains', String(session.attack_chains?.length || 0)],
+                          ['Scenario', session.scenario],
+                        ].map(([label, value], i) => (
+                          <tr key={label} className={cn("border-b border-border last:border-b-0", i % 2 === 0 ? "bg-background" : "bg-muted/10")}>
+                            <td className="px-6 py-3 w-40 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
+                            <td className="px-6 py-3 text-sm text-foreground">{value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
 
-              {/* Executive summary */}
-              {session.executive_summary && (
-                <Card className="p-6 border-l-4 border-l-primary">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Executive Summary</h3>
-                  <div className="prose prose-sm max-w-none text-foreground">
-                    <ReactMarkdown>{session.executive_summary}</ReactMarkdown>
-                  </div>
-                </Card>
-              )}
+                  {session.executive_summary && (
+                    <Card className="p-6 border-l-4 border-l-primary">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Executive Summary</h3>
+                      <div className="prose prose-sm max-w-none text-foreground">
+                        <ReactMarkdown>{session.executive_summary}</ReactMarkdown>
+                      </div>
+                    </Card>
+                  )}
 
-              {/* Risk heatmap */}
-              <RiskHeatmap risks={session.risk_registry} />
+                  <RiskHeatmap risks={session.risk_registry} />
 
-              {/* Risk registry table */}
-              {session.risk_registry?.length > 0 && (
-                <MitigationTable risks={session.risk_registry} />
-              )}
+                  {session.risk_registry?.length > 0 && <MitigationTable risks={session.risk_registry} />}
 
-              {/* Debate transcript table */}
-              {session.rounds?.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Debate Transcript</h3>
-                  <div className="space-y-4">
-                    {session.rounds.map((round, i) => (
-                      <DebateRound key={i} round={round} index={i} />
-                    ))}
-                  </div>
-                </div>
-              )}
+                  {session.rounds?.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Debate Transcript</h3>
+                      <div className="space-y-4">
+                        {session.rounds.map((round, i) => <DebateRound key={i} round={round} index={i} />)}
+                      </div>
+                    </div>
+                  )}
 
-              {/* Attack chains */}
-              {session.attack_chains?.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Attack / Effect Chains</h3>
-                  <ChainDiagram chains={session.attack_chains} />
-                </div>
-              )}
+                  {session.attack_chains?.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Attack / Effect Chains</h3>
+                      <ChainDiagram chains={session.attack_chains} />
+                    </div>
+                  )}
 
-              {/* Mitigation playbook */}
-              {session.mitigation_playbook && (
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Mitigation Playbook</h3>
-                  <MitigationPlaybook playbook={session.mitigation_playbook} />
-                </div>
+                  {session.mitigation_playbook && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Mitigation Playbook</h3>
+                      <MitigationPlaybook playbook={session.mitigation_playbook} />
+                    </div>
+                  )}
+                </>
               )}
             </TabsContent>
 
             <TabsContent value="risks" className="mt-4">
-              <MitigationTable risks={session.risk_registry} />
+              {isV2 ? (
+                sessionSynthesis?.priority_mitigations
+                  ? <Card className="p-6"><div className="prose prose-sm max-w-none text-foreground"><ReactMarkdown>{sessionSynthesis.priority_mitigations}</ReactMarkdown></div></Card>
+                  : <Card className="p-8 text-center"><p className="text-muted-foreground">Priority mitigations not yet generated</p></Card>
+              ) : (
+                <MitigationTable risks={session.risk_registry} />
+              )}
             </TabsContent>
 
             <TabsContent value="chains" className="mt-4">
-              <ChainDiagram chains={session.attack_chains} />
+              {isV2 ? (
+                sessionSynthesis?.compound_chains?.length
+                  ? (
+                    <div className="space-y-4">
+                      {sessionSynthesis.compound_chains.map((chain, ci) => (
+                        <Card key={ci} className="overflow-hidden">
+                          <div className="px-6 py-3 border-b border-border bg-muted/30">
+                            <h4 className="text-sm font-semibold">{chain.name}</h4>
+                          </div>
+                          <div className="p-5 space-y-3">
+                            {(chain.steps || []).map((step, si) => {
+                              const isLast = si === chain.steps.length - 1;
+                              return (
+                                <div key={si} className="flex items-start gap-3">
+                                  <div className="flex flex-col items-center flex-shrink-0">
+                                    <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary">
+                                      {step.step_number || si + 1}
+                                    </div>
+                                    {!isLast && <div className="w-px h-4 bg-border mt-1" />}
+                                  </div>
+                                  <p className="text-sm text-foreground leading-relaxed pt-1 pb-2">{step.step_text}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )
+                  : <Card className="p-8 text-center"><p className="text-muted-foreground">No compound chains identified</p></Card>
+              ) : (
+                <ChainDiagram chains={session.attack_chains} />
+              )}
             </TabsContent>
 
-            {session.mitigation_playbook && (
+            {!isV2 && session.mitigation_playbook && (
               <TabsContent value="playbook" className="mt-4">
                 <MitigationPlaybook playbook={session.mitigation_playbook} />
               </TabsContent>

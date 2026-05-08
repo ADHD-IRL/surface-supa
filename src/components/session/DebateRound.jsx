@@ -5,6 +5,24 @@ import ReactMarkdown from 'react-markdown';
 import { Loader2, Swords, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+const SEV_ORDER = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+const SEV_CLASS = {
+  CRITICAL: 'border-red-700/40 text-red-700 bg-red-700/5',
+  HIGH:     'border-orange-500/40 text-orange-600 bg-orange-500/5',
+  MEDIUM:   'border-amber-500/40 text-amber-600 bg-amber-500/5',
+  LOW:      'border-green-team/40 text-green-team bg-green-team/5',
+};
+
+function SeverityBadge({ severity }) {
+  if (!severity) return null;
+  return (
+    <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0 w-fit', SEV_CLASS[severity] || SEV_CLASS.HIGH)}>
+      {severity}
+    </Badge>
+  );
+}
+
 function ThinkingDots({ color }) {
   return (
     <div className="flex items-center gap-2 py-3">
@@ -160,5 +178,116 @@ export default function DebateRound({ round, index, total }) {
         </tbody>
       </table>
     </Card>
+  );
+}
+
+// ── V2 ────────────────────────────────────────────────────────────────────────
+
+function AgentRoundRow({ sa, agent, roundKey, statusKey, textKey, severityKey, severityR1Key }) {
+  const isRed = agent?.team === 'red';
+  const isGenerating = sa.status === statusKey;
+  const text = sa[textKey];
+  const severity = sa[severityKey];
+  const prevSeverity = severityR1Key ? sa[severityR1Key] : null;
+  const sevShift = severity && prevSeverity && severity !== prevSeverity;
+  const sevUp = sevShift && (SEV_ORDER[severity] || 0) > (SEV_ORDER[prevSeverity] || 0);
+
+  return (
+    <tr className={cn('border-b border-border last:border-b-0', isRed ? 'bg-red-team/[0.02]' : 'bg-blue-team/[0.02]')}>
+      <td className={cn('align-top px-4 py-4 border-r w-36 flex-shrink-0', isRed ? 'border-r-red-team/20' : 'border-r-blue-team/20')}>
+        <div className="flex flex-col gap-1.5">
+          <Badge variant="outline" className={cn('text-xs px-1.5 py-0 w-fit', isRed ? 'border-red-team/30 text-red-team bg-red-team/5' : 'border-blue-team/30 text-blue-team bg-blue-team/5')}>
+            {isRed ? 'Red' : 'Blue'}
+          </Badge>
+          {agent?.name && <span className="text-xs font-semibold text-foreground leading-snug">{agent.name}</span>}
+          {severity && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <SeverityBadge severity={severity} />
+              {sevShift && (
+                <span className={cn('text-xs font-bold leading-none', sevUp ? 'text-red-team' : 'text-green-team')}>
+                  {sevUp ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="align-top px-5 py-4">
+        {text ? (
+          <div className="prose prose-sm max-w-none text-foreground break-words">
+            <ReactMarkdown>{text}</ReactMarkdown>
+          </div>
+        ) : isGenerating ? (
+          <ThinkingDots color={isRed ? 'bg-red-team' : 'bg-blue-team'} />
+        ) : (
+          <p className="text-sm text-muted-foreground italic">Pending…</p>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+export function DebateRoundV2({ sessionAgents = [], agents = [] }) {
+  const sorted = [...sessionAgents].sort((a, b) => {
+    const aA = agents.find(x => x.id === a.agent_id);
+    const bA = agents.find(x => x.id === b.agent_id);
+    const aT = aA?.team || 'blue';
+    const bT = bA?.team || 'blue';
+    if (aT !== bT) return aT === 'red' ? -1 : 1;
+    return (aA?.name || '').localeCompare(bA?.name || '');
+  });
+
+  const hasR2 = sorted.some(sa => sa.round2_rebuttal || sa.status === 'generating_r2' || sa.status === 'complete');
+
+  return (
+    <div className="space-y-4">
+      {/* Round 1 */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-muted/40">
+          <Swords className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Round 1 — Independent Assessments</span>
+        </div>
+        <table className="w-full border-collapse">
+          <tbody>
+            {sorted.map(sa => (
+              <AgentRoundRow
+                key={sa.id}
+                sa={sa}
+                agent={agents.find(x => x.id === sa.agent_id)}
+                statusKey="generating_r1"
+                textKey="round1_assessment"
+                severityKey="round1_severity"
+                severityR1Key={null}
+              />
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* Round 2 */}
+      {hasR2 && (
+        <Card className="overflow-hidden">
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-muted/40">
+            <Swords className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Round 2 — Rebuttals</span>
+          </div>
+          <table className="w-full border-collapse">
+            <tbody>
+              {sorted.map(sa => (
+                <AgentRoundRow
+                  key={sa.id}
+                  sa={sa}
+                  agent={agents.find(x => x.id === sa.agent_id)}
+                  statusKey="generating_r2"
+                  textKey="round2_rebuttal"
+                  severityKey="round2_revised_severity"
+                  severityR1Key="round1_severity"
+                />
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
   );
 }
