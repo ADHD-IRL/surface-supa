@@ -206,6 +206,39 @@
       "enum": ["v1", "v2"],
       "description": "v1 = sequential red→blue rounds; v2 = parallel R1→R2→Synthesis"
     },
+    "v2_agent_results": {
+      "type": "array",
+      "description": "Per-agent R1 + R2 results for V2 debate format",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agent_id": { "type": "string" },
+          "agent_name": { "type": "string" },
+          "team": { "type": "string" },
+          "discipline": { "type": "string" },
+          "round1_assessment": { "type": "string" },
+          "round1_severity": { "type": "string" },
+          "round2_rebuttal": { "type": "string" },
+          "round2_revised_severity": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "v2_synthesis": {
+      "type": "object",
+      "description": "V2 synthesis report and SCRS score",
+      "properties": {
+        "raw_text": { "type": "string" },
+        "consensus_findings": { "type": "string" },
+        "contested_findings": { "type": "string" },
+        "compound_chains": { "type": "array", "items": { "type": "object" } },
+        "blind_spots": { "type": "string" },
+        "priority_mitigations": { "type": "string" },
+        "sharpest_insights": { "type": "string" },
+        "scrs_score": { "type": "number" },
+        "scrs_breakdown": { "type": "object" }
+      }
+    },
     "parent_session_id": {
       "type": "string",
       "description": "ID of the session this was re-run from"

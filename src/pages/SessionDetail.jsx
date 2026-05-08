@@ -20,7 +20,7 @@ import MitigationPlaybook from '@/components/session/MitigationPlaybook';
 import DebateRoster from '@/components/session/DebateRoster';
 import SynthesisReport from '@/components/session/SynthesisReport';
 import ReactMarkdown from 'react-markdown';
-import { buildAgentSystemPrompt, buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, formatOthersAssessments, resolveAgent, extractSynthesisSections } from '@/lib/agentData';
+import { buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, formatOthersAssessments, resolveAgent, extractSynthesisSections } from '@/lib/agentData';
 import { asyncPool } from '@/lib/asyncPool';
 import { computeSCRS } from '@/lib/scrsEngine';
 
@@ -80,19 +80,9 @@ export default function SessionDetail() {
 
   const isV2 = session?.debate_format === 'v2';
 
-  const { data: sessionAgents = [] } = useQuery({
-    queryKey: ['session_agents', id],
-    queryFn: () => base44.entities.SessionAgent.filter({ session_id: id }),
-    enabled: isV2,
-    refetchInterval: session?.status === 'running' ? 2000 : false,
-  });
-
-  const { data: sessionSynthesisArr = [] } = useQuery({
-    queryKey: ['session_synthesis', id],
-    queryFn: () => base44.entities.SessionSynthesis.filter({ session_id: id }),
-    enabled: isV2 && session?.status === 'completed',
-  });
-  const sessionSynthesis = sessionSynthesisArr[0] || null;
+  // V2 data lives on the Session entity itself — no separate entity queries needed
+  const sessionAgents = session?.v2_agent_results || [];
+  const sessionSynthesis = session?.v2_synthesis || null;
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
 
@@ -111,134 +101,124 @@ export default function SessionDetail() {
 
       if (!eligible.length) throw new Error('No agents assigned to this session');
 
-      // Resolve rich fields from system_prompt JSON
       const resolvedAgents = eligible.map(a => resolveAgent(a));
-
-      // Create session_agents rows
-      await Promise.all(resolvedAgents.map(a =>
-        base44.entities.SessionAgent.create({ session_id: id, agent_id: a.id, status: 'pending' })
-      ));
-
-      // Load rows (need their IDs for updates)
-      let agentRows = await base44.entities.SessionAgent.filter({ session_id: id });
 
       const scenarioContext = [
         session.scenario,
         session.reference_urls?.length ? `\nReference materials: ${session.reference_urls.join(', ')}` : '',
       ].filter(Boolean).join('');
 
-      // Helper to enrich a row with agent metadata
-      const enrichRow = (row) => {
-        const agent = resolvedAgents.find(a => a.id === row.agent_id) || {};
-        return { ...row, agent_name: agent.name || '', discipline: agent.discipline || '', team: agent.team || 'red' };
-      };
+      // Local working copies — one per agent
+      const agentResults = resolvedAgents.map(a => ({
+        agent_id: a.id,
+        agent_name: a.name || '',
+        team: a.team || 'red',
+        discipline: a.discipline || '',
+        round1_assessment: '',
+        round1_severity: '',
+        round2_rebuttal: '',
+        round2_revised_severity: '',
+        status: 'pending',
+      }));
 
-      // Set initial UI state
-      const toUiAgent = (row) => {
-        const agent = resolvedAgents.find(a => a.id === row.agent_id);
-        return { id: row.agent_id, name: agent?.name || row.agent_id, team: agent?.team || 'red', r1Status: 'pending', r2Status: 'pending' };
-      };
-      setRunningAgents({ format: 'v2', phase: 'r1', agents: agentRows.map(toUiAgent) });
+      // Initialise UI
+      setRunningAgents({
+        format: 'v2', phase: 'r1',
+        agents: agentResults.map(r => ({ id: r.agent_id, name: r.agent_name, team: r.team, r1Status: 'pending', r2Status: 'pending' })),
+      });
 
       // ── Phase 1: R1 — all agents in parallel ───────────────────────────────
       setRunningStep('Round 1 — Independent assessments');
-      await asyncPool(3, agentRows, async (row) => {
-        await base44.entities.SessionAgent.update(row.id, { status: 'generating_r1' });
+      await asyncPool(3, resolvedAgents, async (agent) => {
         setRunningAgents(prev => prev && ({
           ...prev,
-          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r1Status: 'running' } : a),
+          agents: prev.agents.map(a => a.id === agent.id ? { ...a, r1Status: 'running' } : a),
         }));
-        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
 
-        const agent = resolvedAgents.find(a => a.id === row.agent_id);
         const raw = await base44.integrations.Core.InvokeLLM({ prompt: buildR1Prompt(agent, scenarioContext) });
-        const { assessment, severity } = parseSeverityFromText(raw);
+        const { assessment, severity } = parseSeverityFromText(typeof raw === 'string' ? raw : String(raw));
 
-        await base44.entities.SessionAgent.update(row.id, {
-          round1_assessment: assessment,
-          round1_severity: severity,
-          status: 'r1_done',
-        });
+        const idx = agentResults.findIndex(r => r.agent_id === agent.id);
+        if (idx >= 0) {
+          agentResults[idx].round1_assessment = assessment;
+          agentResults[idx].round1_severity = severity;
+          agentResults[idx].status = 'r1_done';
+        }
         setRunningAgents(prev => prev && ({
           ...prev,
-          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r1Status: 'done' } : a),
+          agents: prev.agents.map(a => a.id === agent.id ? { ...a, r1Status: 'done' } : a),
         }));
-        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
       });
 
-      // Reload rows with R1 data
-      agentRows = await base44.entities.SessionAgent.filter({ session_id: id });
+      // Persist R1 results to Session
+      await base44.entities.Session.update(id, { v2_agent_results: [...agentResults] });
+      queryClient.invalidateQueries({ queryKey: ['session', id] });
 
       // ── Phase 2: R2 — all agents in parallel ───────────────────────────────
       setRunningStep('Round 2 — Rebuttals');
       setRunningAgents(prev => prev && ({ ...prev, phase: 'r2' }));
 
-      await asyncPool(3, agentRows, async (row) => {
-        await base44.entities.SessionAgent.update(row.id, { status: 'generating_r2' });
+      await asyncPool(3, resolvedAgents, async (agent) => {
         setRunningAgents(prev => prev && ({
           ...prev,
-          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r2Status: 'running' } : a),
+          agents: prev.agents.map(a => a.id === agent.id ? { ...a, r2Status: 'running' } : a),
         }));
-        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
 
-        const agent = resolvedAgents.find(a => a.id === row.agent_id);
-        const enrichedRows = agentRows.map(enrichRow);
-        const othersText = formatOthersAssessments(enrichedRows, row.agent_id);
+        const othersText = formatOthersAssessments(agentResults, agent.id);
         const raw = await base44.integrations.Core.InvokeLLM({ prompt: buildR2Prompt(agent, scenarioContext, othersText) });
-        const { assessment, severity } = parseSeverityFromText(raw);
+        const { assessment, severity } = parseSeverityFromText(typeof raw === 'string' ? raw : String(raw));
 
-        await base44.entities.SessionAgent.update(row.id, {
-          round2_rebuttal: assessment,
-          round2_revised_severity: severity,
-          status: 'complete',
-        });
+        const idx = agentResults.findIndex(r => r.agent_id === agent.id);
+        if (idx >= 0) {
+          agentResults[idx].round2_rebuttal = assessment;
+          agentResults[idx].round2_revised_severity = severity;
+          agentResults[idx].status = 'complete';
+        }
         setRunningAgents(prev => prev && ({
           ...prev,
-          agents: prev.agents.map(a => a.id === row.agent_id ? { ...a, r2Status: 'done' } : a),
+          agents: prev.agents.map(a => a.id === agent.id ? { ...a, r2Status: 'done' } : a),
         }));
-        queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
       });
 
-      // Reload rows with R2 data
-      agentRows = await base44.entities.SessionAgent.filter({ session_id: id });
+      // Persist R2 results to Session
+      await base44.entities.Session.update(id, { v2_agent_results: [...agentResults] });
+      queryClient.invalidateQueries({ queryKey: ['session', id] });
 
       // ── Phase 3: Synthesis ─────────────────────────────────────────────────
       setRunningStep('Generating synthesis...');
       setRunningAgents(prev => prev && ({ ...prev, phase: 'synthesis' }));
 
-      const enrichedRows = agentRows.map(enrichRow);
       const synthRaw = await base44.integrations.Core.InvokeLLM({
-        prompt: buildSynthesisPrompt(session, enrichedRows, scenarioContext),
+        prompt: buildSynthesisPrompt(session, agentResults, scenarioContext),
       });
 
-      const sections = extractSynthesisSections(typeof synthRaw === 'string' ? synthRaw : (synthRaw?.text || JSON.stringify(synthRaw)));
+      const rawText = typeof synthRaw === 'string' ? synthRaw : String(synthRaw);
+      const sections = extractSynthesisSections(rawText);
 
-      // SCRS: enrich sessionAgents with agent data for expertise_level
-      const scrsAgents = agentRows.map(row => ({
-        ...row,
-        agent: resolvedAgents.find(a => a.id === row.agent_id) || {},
+      // SCRS — wrap each result with .agent for expertise_level lookup
+      const scrsAgents = agentResults.map(r => ({
+        ...r,
+        agent: resolvedAgents.find(a => a.id === r.agent_id) || {},
       }));
       const chainAnalyses = (sections.compound_chains || []).map(() => ({ chain_resilience: 'MEDIUM', steps: [] }));
       const { scrs, breakdown } = computeSCRS({ sessionAgents: scrsAgents, chainAnalyses, appliedCMs: [] });
 
-      await base44.entities.SessionSynthesis.create({
-        session_id: id,
-        raw_text: synthRaw,
-        consensus_findings: sections.consensus_findings || '',
-        contested_findings: sections.contested_findings || '',
-        compound_chains: sections.compound_chains || [],
-        blind_spots: sections.blind_spots || '',
-        priority_mitigations: sections.priority_mitigations || '',
-        sharpest_insights: sections.sharpest_insights || '',
-        scrs_score: scrs,
-        scrs_breakdown: breakdown,
+      await base44.entities.Session.update(id, {
+        status: 'completed',
+        v2_synthesis: {
+          raw_text: rawText,
+          consensus_findings: sections.consensus_findings || '',
+          contested_findings: sections.contested_findings || '',
+          compound_chains: sections.compound_chains || [],
+          blind_spots: sections.blind_spots || '',
+          priority_mitigations: sections.priority_mitigations || '',
+          sharpest_insights: sections.sharpest_insights || '',
+          scrs_score: scrs,
+          scrs_breakdown: breakdown,
+        },
       });
 
-      await base44.entities.Session.update(id, { status: 'completed' });
-
       queryClient.invalidateQueries({ queryKey: ['session', id] });
-      queryClient.invalidateQueries({ queryKey: ['session_agents', id] });
-      queryClient.invalidateQueries({ queryKey: ['session_synthesis', id] });
       setRunningStep('');
       setRunningAgents(null);
       setDebateStartTime(null);
