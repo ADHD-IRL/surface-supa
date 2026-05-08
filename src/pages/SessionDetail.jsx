@@ -91,28 +91,10 @@ export default function SessionDetail() {
 
   const isV2 = !!(session?.debate_format === 'v2' || v2SynthData);
 
-  // Rebuild per-agent shape from rounds[0] (R1) and rounds[1] (R2)
+  // Per-agent results stored inside executive_summary JSON (agent_results key)
   const sessionAgents = (() => {
-    if (!isV2 || !session?.rounds?.length) return [];
-    const r1 = session.rounds[0];
-    const r2 = session.rounds[1];
-    const allR2 = [...(r2?.red_responses || []), ...(r2?.blue_responses || [])];
-    return [
-      ...(r1.red_responses || []).map(r => ({ ...r, team: 'red' })),
-      ...(r1.blue_responses || []).map(r => ({ ...r, team: 'blue' })),
-    ].map(r1row => {
-      const r2row = allR2.find(r => r.agent_id === r1row.agent_id);
-      return {
-        agent_id: r1row.agent_id,
-        agent_name: r1row.agent_name,
-        team: r1row.team,
-        round1_assessment: r1row.response || '',
-        round1_severity: r1row.severity || '',
-        round2_rebuttal: r2row?.response || '',
-        round2_revised_severity: r2row?.severity || '',
-        status: r2row?.response ? 'complete' : 'r1_done',
-      };
-    });
+    if (!isV2 || !v2SynthData?.agent_results?.length) return [];
+    return v2SynthData.agent_results;
   })();
 
   const sessionSynthesis = (() => {
@@ -165,7 +147,6 @@ export default function SessionDetail() {
         round2_revised_severity: '',
         status: 'pending',
       }));
-      let r1Round = null;
 
       // Initialise UI
       setRunningAgents({
@@ -196,19 +177,7 @@ export default function SessionDetail() {
         }));
       });
 
-      // Persist R1 results — stored as rounds[0] with red_responses/blue_responses
-      r1Round = {
-        round_number: 1,
-        red_responses: agentResults.filter(r => r.team === 'red').map(r => ({
-          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round1_assessment, severity: r.round1_severity,
-        })),
-        blue_responses: agentResults.filter(r => r.team === 'blue').map(r => ({
-          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round1_assessment, severity: r.round1_severity,
-        })),
-        status: 'r1_done',
-      };
-      await base44.entities.Session.update(id, { rounds: [r1Round] });
-      queryClient.invalidateQueries({ queryKey: ['session', id] });
+      // No mid-run persist for R1 — progress is tracked via runningAgents local state
 
       // ── Phase 2: R2 — all agents in parallel ───────────────────────────────
       setRunningStep('Round 2 — Rebuttals');
@@ -236,19 +205,7 @@ export default function SessionDetail() {
         }));
       });
 
-      // Persist R1+R2 — rounds[0] stays, rounds[1] = R2 per-agent rebuttals
-      const r2Round = {
-        round_number: 2,
-        red_responses: agentResults.filter(r => r.team === 'red').map(r => ({
-          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round2_rebuttal, severity: r.round2_revised_severity,
-        })),
-        blue_responses: agentResults.filter(r => r.team === 'blue').map(r => ({
-          agent_id: r.agent_id, agent_name: r.agent_name, response: r.round2_rebuttal, severity: r.round2_revised_severity,
-        })),
-        status: 'complete',
-      };
-      await base44.entities.Session.update(id, { rounds: [r1Round, r2Round] });
-      queryClient.invalidateQueries({ queryKey: ['session', id] });
+      // No mid-run persist for R2 — progress tracked via runningAgents local state
 
       // ── Phase 3: Synthesis ─────────────────────────────────────────────────
       setRunningStep('Generating synthesis...');
@@ -280,9 +237,10 @@ export default function SessionDetail() {
         })),
       }));
 
-      // Synthesis sections → executive_summary as JSON (marker: _v2:true)
+      // All V2 data → executive_summary JSON (agent_results + synthesis sections)
       const synthJson = JSON.stringify({
         _v2: true,
+        agent_results: agentResults,
         consensus_findings: sections.consensus_findings || '',
         contested_findings: sections.contested_findings || '',
         blind_spots: sections.blind_spots || '',
@@ -348,6 +306,105 @@ export default function SessionDetail() {
     await base44.entities.Session.update(id, { mitigation_playbook: playbook });
     queryClient.invalidateQueries({ queryKey: ['session', id] });
     setGeneratingPlaybook(false);
+  };
+
+  const handleExportPDFV2 = async () => {
+    const { default: jsPDF } = await import('jspdf');
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const PAGE_W = 210, PAGE_H = 297, ML = 18, MR = 18;
+    const CONTENT_W = PAGE_W - ML - MR;
+    const MARGIN_TOP = 18, MARGIN_BOTTOM = 22;
+    let y = MARGIN_TOP;
+
+    const checkPage = (needed = 10) => {
+      if (y + needed > PAGE_H - MARGIN_BOTTOM) { doc.addPage(); y = MARGIN_TOP; }
+    };
+    const cleanMd = (t = '') => t.replace(/[*_#`>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    const sectionHeader = (title) => {
+      checkPage(18); y += 5;
+      doc.setFillColor(22, 78, 162);
+      doc.roundedRect(ML, y - 5.5, CONTENT_W, 10, 2, 2, 'F');
+      doc.setFontSize(10); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
+      doc.text(title.toUpperCase(), ML + 4, y + 0.5); y += 10;
+    };
+    const subHeader = (title) => {
+      checkPage(12); y += 3;
+      doc.setFontSize(9); doc.setTextColor(22, 78, 162); doc.setFont('helvetica', 'bold');
+      doc.text(title, ML, y); y += 5;
+    };
+    const bodyText = (text, indent = 0) => {
+      doc.setFontSize(8); doc.setTextColor(50, 50, 50); doc.setFont('helvetica', 'normal');
+      const lines = doc.splitTextToSize(cleanMd(text), CONTENT_W - indent);
+      lines.forEach(ln => { checkPage(5); doc.text(ln, ML + indent, y); y += 4.5; });
+    };
+    const addFooter = () => {
+      const total = doc.getNumberOfPages();
+      for (let p = 1; p <= total; p++) {
+        doc.setPage(p);
+        doc.setFontSize(7); doc.setTextColor(150, 150, 150); doc.setFont('helvetica', 'normal');
+        doc.text('Surface — Confidential Risk Analysis', ML, PAGE_H - 8);
+        doc.text(`Page ${p} of ${total}`, PAGE_W - MR - 20, PAGE_H - 8);
+        doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.2);
+        doc.line(ML, PAGE_H - 12, PAGE_W - MR, PAGE_H - 12);
+      }
+    };
+    const SEV_COLORS = { CRITICAL: [220,38,38], HIGH: [234,88,12], MEDIUM: [202,138,4], LOW: [22,163,74] };
+
+    // ── Cover ─────────────────────────────────────────────────────
+    doc.setFillColor(15, 35, 70); doc.rect(0, 0, PAGE_W, 80, 'F');
+    doc.setFillColor(22, 78, 162); doc.rect(0, 70, PAGE_W, 6, 'F');
+    doc.setFontSize(9); doc.setTextColor(150, 190, 255); doc.setFont('helvetica', 'normal');
+    doc.text('SURFACE  ·  ADVERSARIAL RISK INTELLIGENCE', ML, 28);
+    y = 32;
+    doc.setFontSize(22); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
+    doc.splitTextToSize(session.title, CONTENT_W).forEach(line => { doc.text(line, ML, y + 14); y += 9; });
+    doc.setFontSize(10); doc.setTextColor(180, 210, 255); doc.setFont('helvetica', 'normal');
+    doc.text('V2 Parallel Debate Report', ML, 66);
+    doc.addPage(); y = MARGIN_TOP;
+
+    // ── Scenario ──────────────────────────────────────────────────
+    sectionHeader('Scenario');
+    bodyText(session.scenario);
+    y += 3;
+
+    // ── Agent Assessments ─────────────────────────────────────────
+    if (sessionAgents.length > 0) {
+      sectionHeader('Round 1 — Independent Assessments');
+      sessionAgents.forEach(sa => {
+        const sc = SEV_COLORS[sa.round1_severity] || [100,100,100];
+        subHeader(`${sa.agent_name || sa.agent_id} (${(sa.team || '').toUpperCase()})${sa.round1_severity ? ` — ${sa.round1_severity}` : ''}`);
+        if (sa.round1_assessment) bodyText(sa.round1_assessment, 4);
+        y += 2;
+      });
+      sectionHeader('Round 2 — Rebuttals');
+      sessionAgents.filter(sa => sa.round2_rebuttal).forEach(sa => {
+        const shift = sa.round2_revised_severity && sa.round2_revised_severity !== sa.round1_severity
+          ? ` → ${sa.round2_revised_severity}` : '';
+        subHeader(`${sa.agent_name || sa.agent_id}${sa.round2_revised_severity ? ` — ${sa.round2_revised_severity}${shift}` : ''}`);
+        bodyText(sa.round2_rebuttal, 4);
+        y += 2;
+      });
+    }
+
+    // ── Synthesis ─────────────────────────────────────────────────
+    if (sessionSynthesis) {
+      const synth = sessionSynthesis;
+      if (synth.consensus_findings) { sectionHeader('Consensus Findings'); bodyText(synth.consensus_findings); y += 2; }
+      if (synth.contested_findings) { sectionHeader('Contested Findings'); bodyText(synth.contested_findings); y += 2; }
+      if (synth.blind_spots) { sectionHeader('Blind Spots'); bodyText(synth.blind_spots); y += 2; }
+      if (synth.priority_mitigations) { sectionHeader('Priority Mitigations'); bodyText(synth.priority_mitigations); y += 2; }
+      if (synth.sharpest_insights) { sectionHeader('Sharpest Insights'); bodyText(synth.sharpest_insights); y += 2; }
+      if (synth.scrs_score != null) {
+        sectionHeader('SCRS Risk Score');
+        doc.setFontSize(28); doc.setFont('helvetica', 'bold');
+        const sc = synth.scrs_score >= 70 ? [220,38,38] : synth.scrs_score >= 40 ? [234,88,12] : [22,163,74];
+        doc.setTextColor(...sc);
+        doc.text(String(synth.scrs_score), ML, y + 14); y += 20;
+      }
+    }
+
+    addFooter();
+    doc.save(`surface-v2-${session.title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
   };
 
   const handleExportPDF = async () => {
@@ -928,8 +985,8 @@ export default function SessionDetail() {
               {generatingPlaybook ? 'Generating...' : 'Generate Playbook'}
             </Button>
           )}
-          {!isV2 && session.status === 'completed' && (
-            <Button variant="outline" onClick={handleExportPDF} className="gap-2">
+          {session.status === 'completed' && (
+            <Button variant="outline" onClick={isV2 ? handleExportPDFV2 : handleExportPDF} className="gap-2">
               <FileDown className="w-4 h-4" /> Export PDF
             </Button>
           )}
