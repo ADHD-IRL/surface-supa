@@ -316,6 +316,7 @@ export default function SessionDetail() {
         status: 'completed',
         executive_summary: `v2url:${file_url}`,
         attack_chains: attackChains,
+        scrs_score: scrs,
       });
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });
