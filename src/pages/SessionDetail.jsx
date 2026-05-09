@@ -78,38 +78,43 @@ export default function SessionDetail() {
     queryFn: () => base44.entities.Agent.list(),
   });
 
-  // ── V2 detection + data derivation (from existing Session fields) ──────────
-  // debate_format may not be returned if schema isn't deployed yet;
-  // fall back to checking executive_summary for the _v2 JSON marker.
-  const v2SynthData = (() => {
-    try {
-      if (!session?.executive_summary?.startsWith('{"_v2"')) return null;
-      const d = JSON.parse(session.executive_summary);
-      return d._v2 ? d : null;
-    } catch { return null; }
-  })();
+  // ── V2 detection + data derivation ──────────────────────────────────────────
+  // executive_summary holds either:
+  //   "v2url:<url>"  — URL to uploaded JSON file (large content)
+  //   '{"_v2":true…}' — inline JSON (legacy / small sessions)
+  const [v2SynthData, setV2SynthData] = useState(null);
+
+  useEffect(() => {
+    const es = session?.executive_summary;
+    if (!es) { setV2SynthData(null); return; }
+    if (es.startsWith('v2url:')) {
+      const url = es.slice(6);
+      fetch(url)
+        .then(r => r.json())
+        .then(d => setV2SynthData(d._v2 ? d : null))
+        .catch(() => setV2SynthData(null));
+    } else if (es.startsWith('{"_v2"')) {
+      try { const d = JSON.parse(es); setV2SynthData(d._v2 ? d : null); }
+      catch { setV2SynthData(null); }
+    } else {
+      setV2SynthData(null);
+    }
+  }, [session?.executive_summary]);
 
   const isV2 = !!(session?.debate_format === 'v2' || v2SynthData);
 
-  // Per-agent results stored inside executive_summary JSON (agent_results key)
-  const sessionAgents = (() => {
-    if (!isV2 || !v2SynthData?.agent_results?.length) return [];
-    return v2SynthData.agent_results;
-  })();
+  const sessionAgents = v2SynthData?.agent_results || [];
 
-  const sessionSynthesis = (() => {
-    if (!isV2 || !v2SynthData) return null;
-    return {
-      ...v2SynthData,
-      compound_chains: (session?.attack_chains || []).map(c => ({
-        name: c.name,
-        steps: (c.steps || []).map((s, i) => ({
-          step_number: i + 1,
-          step_text: s.description || s.label || '',
-        })),
+  const sessionSynthesis = v2SynthData ? {
+    ...v2SynthData,
+    compound_chains: (session?.attack_chains || []).map(c => ({
+      name: c.name,
+      steps: (c.steps || []).map((s, i) => ({
+        step_number: i + 1,
+        step_text: s.description || s.label || '',
       })),
-    };
-  })();
+    })),
+  } : null;
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
 
@@ -255,8 +260,8 @@ export default function SessionDetail() {
         })),
       }));
 
-      // All V2 data → executive_summary JSON (agent_results + synthesis sections)
-      const synthJson = JSON.stringify({
+      // Upload V2 data as JSON file (executive_summary has a size limit)
+      const v2Payload = JSON.stringify({
         _v2: true,
         agent_results: agentResults,
         consensus_findings: sections.consensus_findings || '',
@@ -267,10 +272,12 @@ export default function SessionDetail() {
         scrs_score: scrs,
         scrs_breakdown: breakdown,
       });
+      const jsonFile = new File([v2Payload], `v2-${id}.json`, { type: 'application/json' });
+      const { file_url } = await base44.integrations.Core.UploadFile({ file: jsonFile });
 
       await base44.entities.Session.update(id, {
         status: 'completed',
-        executive_summary: synthJson,
+        executive_summary: `v2url:${file_url}`,
         attack_chains: attackChains,
       });
 
