@@ -263,7 +263,7 @@ Scenario: ${(scenarioContext || '').slice(0, 800)}
 COMPOUND CHAINS:
 ${chainsText}
 
-For each chain, assess its overall resilience (how hard it is to disrupt) and for each step recommend the single most effective mitigation that would break or significantly disrupt the chain at that point. Be specific and actionable.`,
+For each chain, assess its overall resilience (how hard it is to disrupt) and for each step recommend the single most effective mitigation that would break or significantly impede the chain at that point. Be specific — name the control, the owner, and the timeline.`,
     response_json_schema: {
       type: 'object',
       properties: {
@@ -273,19 +273,19 @@ For each chain, assess its overall resilience (how hard it is to disrupt) and fo
             type: 'object',
             properties: {
               chain_name:           { type: 'string' },
-              chain_resilience:     { type: 'string', description: 'HIGH, MEDIUM, or LOW — how hard this chain is to disrupt' },
-              resilience_rationale: { type: 'string', description: 'One sentence explaining the resilience rating' },
+              chain_resilience:     { type: 'string', description: 'HIGH, MEDIUM, or LOW — how hard it is to disrupt this chain' },
+              resilience_rationale: { type: 'string', description: '1-2 sentences explaining the resilience rating' },
               steps: {
                 type: 'array',
                 items: {
                   type: 'object',
                   properties: {
                     step_number:            { type: 'number' },
-                    leverage:               { type: 'string', description: 'HIGH, MEDIUM, or LOW — how critical breaking here is to stopping the chain' },
+                    leverage:               { type: 'string', description: 'HIGH, MEDIUM, or LOW — how critical breaking at this step is' },
                     mitigation_title:       { type: 'string' },
                     mitigation_description: { type: 'string' },
-                    mitigation_owner:       { type: 'string', description: 'Role or team responsible' },
-                    mitigation_timeline:    { type: 'string', description: 'e.g. Within 24h, Within 30 days' },
+                    mitigation_owner:       { type: 'string' },
+                    mitigation_timeline:    { type: 'string' },
                   },
                 },
               },
