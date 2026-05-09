@@ -41,6 +41,26 @@ const MODE_OPTIONS = [
 const RUNTIME_ESTIMATE = { rapid: '~30s', standard: '~2m', deep: '~5m' };
 
 const DRAFT_KEY = 'surface-new-session-draft';
+const SAVED_ROSTERS_KEY = 'surface-saved-rosters';
+
+const SCENARIO_TEMPLATES = [
+  {
+    label: 'Third-party vendor onboarding',
+    text: 'Q3 vendor onboarding for a Tier-1 financial institution. Third-party payment processor with cross-border settlement access seeking integration with core banking systems. Assess supply chain, data access, and operational continuity risks over a 12-month horizon. Include insider threat and contractual enforcement gaps.',
+  },
+  {
+    label: 'Critical infrastructure — OT/ICS',
+    text: 'Operational technology environment for a regional energy utility. SCADA/ICS systems managing grid distribution recently connected to the corporate network for remote monitoring. Evaluate cyber-physical threat vectors including nation-state adversaries targeting uptime and safety systems. 18-month horizon.',
+  },
+  {
+    label: 'Cloud migration — regulated data',
+    text: 'Migration of patient health records (PHI) from on-premises data centres to a multi-cloud architecture. Organisation operates across three EU jurisdictions under GDPR and national health data regulations. Scope: data residency, access control, incident response capability, and vendor lock-in risk.',
+  },
+  {
+    label: 'M&A due diligence — cyber risk',
+    text: 'Pre-acquisition cyber risk assessment of a mid-market SaaS target processing payment card data for 200k+ merchants. Assess inherited technical debt, historical breach exposure, regulatory standing under PCI-DSS, and integration risk with the acquirer\'s existing infrastructure.',
+  },
+];
 
 function ModeCard({ option, active, onClick }) {
   return (
@@ -101,6 +121,17 @@ export default function NewSession() {
   const [rosterMode, setRosterMode] = useState(() =>
     template?.selected_agents?.length ? 'handpick' : 'default',
   );
+
+  // Template dropdown
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
+
+  // Saved rosters
+  const [savedRosters, setSavedRosters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(SAVED_ROSTERS_KEY) || '[]'); } catch { return []; }
+  });
+  const [showSaveRoster, setShowSaveRoster] = useState(false);
+  const [saveRosterName, setSaveRosterName] = useState('');
+  const [activeRosterId, setActiveRosterId] = useState(null);
 
   // Attachment tab
   const [attachmentTab, setAttachmentTab] = useState('url');
@@ -173,6 +204,7 @@ export default function NewSession() {
   };
 
   const toggleAgent = (agentId) => {
+    setActiveRosterId(null);
     setForm(f => ({
       ...f,
       selected_agents: f.selected_agents.includes(agentId)
@@ -227,6 +259,34 @@ export default function NewSession() {
         ? f.selected_agents.filter(id => !ids.includes(id))
         : [...new Set([...f.selected_agents, ...ids])],
     }));
+  };
+
+  const handleSaveRoster = () => {
+    if (!saveRosterName.trim() || form.selected_agents.length === 0) return;
+    const roster = {
+      id: Date.now().toString(),
+      name: saveRosterName.trim(),
+      agent_ids: [...form.selected_agents],
+      savedAt: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+    };
+    const next = [...savedRosters, roster];
+    setSavedRosters(next);
+    try { localStorage.setItem(SAVED_ROSTERS_KEY, JSON.stringify(next)); } catch {}
+    setSaveRosterName('');
+    setShowSaveRoster(false);
+  };
+
+  const handleDeleteRoster = (rosterId) => {
+    const next = savedRosters.filter(r => r.id !== rosterId);
+    setSavedRosters(next);
+    if (activeRosterId === rosterId) setActiveRosterId(null);
+    try { localStorage.setItem(SAVED_ROSTERS_KEY, JSON.stringify(next)); } catch {}
+  };
+
+  const handleLoadRoster = (roster) => {
+    setRosterMode('handpick');
+    setActiveRosterId(roster.id);
+    setForm(f => ({ ...f, selected_agents: roster.agent_ids }));
   };
 
   // Summary bar derived values
@@ -305,6 +365,35 @@ export default function NewSession() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Scenario Description</Label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setTemplateMenuOpen(v => !v)}
+                className="text-[11px] text-primary hover:underline"
+              >
+                Use template ▾
+              </button>
+              {templateMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setTemplateMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-md border border-border bg-popover shadow-md py-1">
+                    {SCENARIO_TEMPLATES.map((t, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setForm(f => ({ ...f, scenario: t.text }));
+                          setTemplateMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted/60 transition-colors"
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
           <Textarea
             placeholder="Describe the scenario, system, or situation you want to stress-test..."
@@ -335,12 +424,46 @@ export default function NewSession() {
 
         {/* Agent Roster — preset cards */}
         <div className="space-y-1.5">
-          <Label className="text-sm font-semibold">Agent Roster</Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold">Agent Roster</Label>
+            <button
+              type="button"
+              onClick={() => setShowSaveRoster(v => !v)}
+              className={cn(
+                'text-[11px] inline-flex items-center gap-1 transition-colors',
+                rosterMode === 'handpick' && form.selected_agents.length > 0
+                  ? 'text-muted-foreground hover:text-foreground'
+                  : 'text-muted-foreground/40 cursor-default',
+              )}
+              disabled={!(rosterMode === 'handpick' && form.selected_agents.length > 0)}
+            >
+              <Plus className="w-3 h-3" /> Save current as roster
+            </button>
+          </div>
+          {showSaveRoster && (
+            <div className="flex gap-2">
+              <Input
+                placeholder="Roster name…"
+                value={saveRosterName}
+                onChange={e => setSaveRosterName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSaveRoster();
+                  if (e.key === 'Escape') { setShowSaveRoster(false); setSaveRosterName(''); }
+                }}
+                className="text-xs h-8"
+                autoFocus
+              />
+              <Button variant="outline" size="sm" className="h-8 px-3 text-xs flex-shrink-0" onClick={handleSaveRoster}
+                disabled={!saveRosterName.trim()}>
+                Save
+              </Button>
+            </div>
+          )}
           <div className="space-y-2">
             {/* Default preset */}
             <button
               type="button"
-              onClick={() => { setRosterMode('default'); setForm(f => ({ ...f, selected_agents: [] })); }}
+              onClick={() => { setRosterMode('default'); setActiveRosterId(null); setForm(f => ({ ...f, selected_agents: [] })); }}
               className={cn(
                 'w-full rounded-lg border px-3.5 py-3 text-left transition-colors flex items-start gap-3',
                 rosterMode === 'default'
@@ -367,10 +490,56 @@ export default function NewSession() {
               )}
             </button>
 
+            {/* Saved roster presets */}
+            {savedRosters.map(roster => {
+              const rosterAgents = agents.filter(a => roster.agent_ids.includes(a.id));
+              const rCount = rosterAgents.filter(a => a.team === 'red').length;
+              const bCount = rosterAgents.filter(a => a.team === 'blue').length;
+              const isActive = activeRosterId === roster.id;
+              return (
+                <div key={roster.id} className={cn(
+                  'w-full rounded-lg border transition-colors flex items-start gap-3',
+                  isActive
+                    ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                    : 'border-border bg-card',
+                )}>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadRoster(roster)}
+                    className="flex items-start gap-3 flex-1 px-3.5 py-3 text-left"
+                  >
+                    <span className={cn(
+                      'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center mt-0.5 flex-shrink-0',
+                      isActive ? 'border-primary' : 'border-muted-foreground/40',
+                    )}>
+                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold">{roster.name}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Saved {roster.savedAt} · {rCount}R + {bCount}B agents
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] flex-shrink-0">
+                      {roster.agent_ids.length} agents
+                    </Badge>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteRoster(roster.id)}
+                    className="p-3 text-muted-foreground/40 hover:text-muted-foreground transition-colors flex-shrink-0"
+                    title="Remove preset"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+
             {/* Hand-pick */}
             <button
               type="button"
-              onClick={() => setRosterMode('handpick')}
+              onClick={() => { setRosterMode('handpick'); setActiveRosterId(null); }}
               className={cn(
                 'w-full rounded-lg border px-3.5 py-3 text-left transition-colors flex items-start gap-3',
                 rosterMode === 'handpick'
