@@ -34,10 +34,16 @@ const STATUS_BADGE = {
   failed:    { label: 'Needs attention',  className: 'bg-red-500/10 text-red-600 border-red-500/20' },
 };
 
+function scrsBand(score) {
+  if (score == null) return null;
+  return score >= 80 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
+}
+
 function SessionRow({ session, onDeleteClick, sessionMap, inset = false }) {
   const navigate = useNavigate();
   const cfg = STATUS_BADGE[session.status] || STATUS_BADGE.draft;
   const color = scrsColor(session.scrs_score);
+  const band = scrsBand(session.scrs_score);
   const modeLabel = session.mode
     ? session.mode.charAt(0).toUpperCase() + session.mode.slice(1)
     : null;
@@ -92,13 +98,21 @@ function SessionRow({ session, onDeleteClick, sessionMap, inset = false }) {
         </div>
       </div>
 
-      {/* SCRS score + delta */}
+      {/* SCRS score + delta + band pill */}
       {session.scrs_score != null && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <div className="text-right">
             <div className="text-[9px] uppercase tracking-wider text-muted-foreground">SCRS</div>
             <div className="text-base font-bold tabular-nums" style={{ color }}>{session.scrs_score}</div>
           </div>
+          {band && color && (
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+              style={{ background: color + '15', color }}
+            >
+              {band}
+            </span>
+          )}
           {delta && (
             <span className={cn('text-[11px] font-medium tabular-nums', delta.startsWith('+') ? 'text-red-600' : 'text-emerald-600')}>
               {delta}
@@ -145,9 +159,10 @@ function RunningCard({ session }) {
           In progress
         </div>
       </div>
-      {/* Indeterminate progress bar */}
-      <div className="h-1 rounded-full bg-muted overflow-hidden">
-        <div className="h-full w-1/3 rounded-full bg-amber-400 animate-pulse" style={{ animation: 'pulse 1.5s ease-in-out infinite' }} />
+      {/* Gradient progress bar */}
+      <div className="h-1.5 rounded-full bg-muted overflow-hidden relative">
+        <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-amber-400 to-amber-500" style={{ width: '40%' }} />
+        <div className="absolute inset-0 bg-gradient-to-r from-amber-200/30 to-transparent animate-pulse" />
       </div>
     </Link>
   );
@@ -174,6 +189,7 @@ export default function SessionsList({
   statusFilter, setStatusFilter,
   searchQuery, setSearchQuery,
   groupByLineage, setGroupByLineage,
+  agents = [],
 }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
 
@@ -199,22 +215,61 @@ export default function SessionsList({
 
   const isEmpty = sessions.length === 0;
 
+  // Roster snapshot data
+  const redAgents = agents.filter(a => a.team === 'red');
+  const blueAgents = agents.filter(a => a.team === 'blue');
+  const redPct = agents.length > 0 ? Math.round((redAgents.length / agents.length) * 100) : 50;
+  const domainCounts = {};
+  agents.forEach(a => { if (a.domain) domainCounts[a.domain] = (domainCounts[a.domain] || 0) + 1; });
+  const topDomains = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
   return (
     <div>
-      {/* Pinned: running sessions */}
+      {/* Pinned: running sessions + roster snapshot */}
       {runningSessions.length > 0 && (
-        <div className="rounded-xl border-2 border-amber-300 bg-amber-50/40 dark:bg-amber-950/10 p-4 mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              <h2 className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
-                In progress · {runningSessions.length}
-              </h2>
+        <div className="grid grid-cols-[1fr_280px] gap-4 mb-6">
+          {/* Left: amber running sessions card */}
+          <div className="rounded-xl border-2 border-amber-300 bg-amber-50/40 dark:bg-amber-950/10 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <h2 className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                  In progress · {runningSessions.length}
+                </h2>
+              </div>
+              <span className="text-[11px] text-amber-700/60 font-mono">live · refetching every 5s</span>
             </div>
-            <span className="text-[11px] text-amber-700/60 font-mono">live · refetching every 5s</span>
+            <div className="space-y-2">
+              {runningSessions.map(s => <RunningCard key={s.id} session={s} />)}
+            </div>
           </div>
-          <div className="space-y-2">
-            {runningSessions.map(s => <RunningCard key={s.id} session={s} />)}
+
+          {/* Right: roster snapshot */}
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">Roster snapshot</div>
+            <div className="text-3xl font-bold tabular-nums mb-3">{agents.length}</div>
+            {agents.length > 0 && (
+              <>
+                <div className="flex h-2 rounded-full overflow-hidden mb-1.5">
+                  <div className="bg-red-500 h-full rounded-l-full" style={{ width: `${redPct}%` }} />
+                  <div className="bg-blue-500 h-full flex-1 rounded-r-full" />
+                </div>
+                <div className="flex items-center justify-between text-[11px] mb-3">
+                  <span className="text-red-600 font-medium">{redAgents.length} Red</span>
+                  <span className="text-blue-600 font-medium">{blueAgents.length} Blue</span>
+                </div>
+                {topDomains.length > 0 && (
+                  <div className="space-y-1">
+                    {topDomains.map(([domain, count]) => (
+                      <div key={domain} className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground truncate">{domain}</span>
+                        <span className="font-semibold tabular-nums ml-2">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

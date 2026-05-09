@@ -85,6 +85,12 @@ export default function SessionDetail() {
     queryFn: () => base44.entities.Agent.list(),
   });
 
+  const { data: parentSession } = useQuery({
+    queryKey: ['session', session?.parent_session_id],
+    queryFn: () => base44.entities.Session.get(session.parent_session_id),
+    enabled: !!(session?.parent_session_id),
+  });
+
   // ── V2 detection + data derivation ──────────────────────────────────────────
   // executive_summary holds either:
   //   "v2url:<url>"  — URL to uploaded JSON file (large content)
@@ -1079,6 +1085,47 @@ export default function SessionDetail() {
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed">{session.scenario}</p>
+
+            {/* Severity distribution bar */}
+            {isV2 && session.status === 'completed' && sessionAgents.length > 0 && (() => {
+              const SEV_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+              const SEV_COLORS = { CRITICAL: '#dc2626', HIGH: '#ea580c', MEDIUM: '#ca8a04', LOW: '#16a34a' };
+              const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+              sessionAgents.forEach(r => {
+                const s = r.round2_revised_severity || r.round1_severity;
+                if (s && counts[s] !== undefined) counts[s]++;
+              });
+              const total = Object.values(counts).reduce((a, b) => a + b, 0);
+              if (total === 0) return null;
+              return (
+                <div className="mt-4 max-w-2xl">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Severity distribution · {total} agent{total !== 1 ? 's' : ''}
+                    </span>
+                    {sevShiftsUp > 0 && (
+                      <span className="text-[10px] text-red-600 font-semibold">
+                        {sevShiftsUp} ↑ &nbsp; {sevShiftsDown} ↓ severity shifts
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex h-2 rounded-full overflow-hidden bg-muted">
+                    {SEV_ORDER.filter(s => counts[s] > 0).map(s => (
+                      <div key={s} style={{ width: `${(counts[s] / total) * 100}%`, background: SEV_COLORS[s] }} title={`${s}: ${counts[s]}`} />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-4 mt-1.5">
+                    {SEV_ORDER.filter(s => counts[s] > 0).map(s => (
+                      <div key={s} className="flex items-center gap-1.5 text-[11px]">
+                        <span className="w-2 h-2 rounded-sm" style={{ background: SEV_COLORS[s] }} />
+                        <span className="text-muted-foreground capitalize">{s.toLowerCase()}</span>
+                        <span className="font-semibold tabular-nums">{counts[s]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* SCRS hero card — completed V2 sessions only */}
@@ -1115,6 +1162,41 @@ export default function SessionDetail() {
                   <div className="text-sm font-semibold mt-0.5">{chainCount} found</div>
                 </div>
               </div>
+
+              {/* Score over re-runs mini bar chart */}
+              {parentSession?.scrs_score != null && (
+                <div className="w-full mt-4 pt-4 border-t border-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Score over re-runs</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">{2} sessions</span>
+                  </div>
+                  <div className="flex items-end gap-2 h-8">
+                    {[
+                      { label: session.parent_session_title?.split(' — ')[0] || 'Parent', scrs: parentSession.scrs_score, active: false },
+                      { label: 'Current', scrs: scrsScore, active: true },
+                    ].map((pt, i) => {
+                      const c = pt.scrs >= 80 ? '#dc2626' : pt.scrs >= 60 ? '#ea580c' : pt.scrs >= 40 ? '#ca8a04' : '#16a34a';
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                          <div className="text-[10px] tabular-nums font-semibold" style={{ color: c }}>{pt.scrs}</div>
+                          <div className="w-full rounded-t" style={{
+                            height: `${pt.scrs * 0.28}px`,
+                            background: c,
+                            opacity: pt.active ? 1 : 0.4,
+                            outline: pt.active ? `2px solid ${c}40` : 'none',
+                            minHeight: 4,
+                          }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-around mt-1">
+                    {[session.parent_session_title?.split(' — ')[0] || 'Parent', 'Current'].map((l, i) => (
+                      <span key={l} className={cn('text-[10px]', i === 1 ? 'font-semibold text-foreground' : 'text-muted-foreground')}>{l}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1515,9 +1597,104 @@ export default function SessionDetail() {
 
         {session.status === 'completed' && (
           <>
-            <TabsContent value="report" className="space-y-6 mt-4">
+            <TabsContent value="report" className="mt-4">
               {isV2 ? (
-                <SynthesisReport synthesis={sessionSynthesis} sessionAgents={sessionAgents} agents={agents} />
+                <div className={cn('gap-5', parentSession?.scrs_score != null ? 'grid grid-cols-[1fr_280px]' : 'space-y-6')}>
+                  <div className="space-y-6 min-w-0">
+                    <SynthesisReport synthesis={sessionSynthesis} sessionAgents={sessionAgents} agents={agents} />
+                    {/* Chains callout — if compound chains found */}
+                    {sessionSynthesis?.compound_chains?.length > 0 && (
+                      <div className="rounded-lg border border-red-200 bg-red-50/40 dark:border-red-900/30 dark:bg-red-950/10 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm font-semibold text-red-700 dark:text-red-400">
+                            {sessionSynthesis.compound_chains.length} compound chain{sessionSynthesis.compound_chains.length !== 1 ? 's' : ''} found
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {sessionSynthesis.compound_chains.slice(0, 2).map((chain, i) => (
+                            <div key={i} className="flex items-center gap-1 text-[11px] flex-wrap">
+                              {(chain.steps || []).slice(0, 3).map((step, j) => (
+                                <React.Fragment key={j}>
+                                  <span className="px-1.5 py-0.5 rounded bg-card border border-border text-foreground text-[10px]">
+                                    {step.step_text?.slice(0, 40) || `Step ${j + 1}`}
+                                  </span>
+                                  {j < (chain.steps || []).slice(0, 3).length - 1 && (
+                                    <span className="text-red-400">→</span>
+                                  )}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {parentSession?.scrs_score != null && (
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-border bg-card p-4">
+                        <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-3">
+                          vs {session.parent_session_title?.split(' — ')[0] || 'parent'}
+                        </div>
+                        <div className="space-y-2.5">
+                          {[
+                            ['SCRS', String(parentSession.scrs_score), String(scrsScore ?? '—'), scrsScore != null && parentSession.scrs_score != null ? (scrsScore > parentSession.scrs_score ? 'red' : 'green') : null],
+                            ['Compound chains', String(session.attack_chains?.length || 0), String(chainCount), null],
+                            ['Mitigations', '—', String(sessionSynthesis?.priority_mitigations ? '✓' : '—'), null],
+                          ].map(([label, before, after, tone]) => {
+                            const delta = label === 'SCRS' && scrsScore != null && parentSession.scrs_score != null
+                              ? scrsScore - parentSession.scrs_score : null;
+                            return (
+                              <div key={label} className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">{label}</span>
+                                <div className="flex items-center gap-1.5 font-mono">
+                                  <span className="text-muted-foreground tabular-nums">{before}</span>
+                                  <span className="text-muted-foreground/40">→</span>
+                                  <span className="font-semibold tabular-nums">{after}</span>
+                                  {delta != null && (
+                                    <span className={cn('text-[10px] font-semibold tabular-nums', delta > 0 ? 'text-red-600' : 'text-emerald-600')}>
+                                      {delta > 0 ? '+' : ''}{delta}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {/* Agent contribution */}
+                      {sessionAgents.length > 0 && (
+                        <div className="rounded-xl border border-border bg-card p-4">
+                          <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-3">Agent contribution</div>
+                          <div className="space-y-2">
+                            {sessionAgents.slice(0, 6).map(r => {
+                              const agent = agents.find(a => a.id === r.agent_id) || {};
+                              const sev = r.round2_revised_severity || r.round1_severity;
+                              const isRed = agent.team === 'red';
+                              const w = sev === 'CRITICAL' ? 100 : sev === 'HIGH' ? 75 : sev === 'MEDIUM' ? 50 : 25;
+                              const c = isRed ? '#dc2626' : '#2563eb';
+                              return (
+                                <div key={r.agent_id} className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold shrink-0" style={{ background: c }}>
+                                    {(agent.name || '?')[0]}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between mb-0.5">
+                                      <span className="text-[11px] font-medium truncate">{agent.name || r.agent_id}</span>
+                                      {sev && <span className="text-[10px] font-mono text-muted-foreground">{sev}</span>}
+                                    </div>
+                                    <div className="h-1 rounded-full bg-muted overflow-hidden">
+                                      <div className="h-full rounded-full" style={{ width: `${w}%`, background: c }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <>
                   {/* Session metadata */}

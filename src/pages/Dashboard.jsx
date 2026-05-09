@@ -66,6 +66,7 @@ export default function Dashboard() {
         setSearchQuery={setSearchQuery}
         groupByLineage={groupByLineage}
         setGroupByLineage={setGroupByLineage}
+        agents={agents}
       />
     </div>
   );
