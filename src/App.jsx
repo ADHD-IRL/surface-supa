@@ -12,6 +12,7 @@ import NewSession from '@/pages/NewSession';
 import SessionDetail from '@/pages/SessionDetail';
 import AgentManager from '@/pages/AgentManager';
 import Splash from '@/pages/Splash';
+import Docs from '@/pages/Docs';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -42,6 +43,7 @@ const AuthenticatedApp = () => {
         <Route path="/sessions/new" element={<NewSession />} />
         <Route path="/sessions/:id" element={<SessionDetail />} />
         <Route path="/agents" element={<AgentManager />} />
+        <Route path="/docs" element={<Docs />} />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>

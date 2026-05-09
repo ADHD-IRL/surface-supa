@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import {
   Shield, LayoutDashboard, Plus, Bot, LogOut,
-  ChevronLeft, ChevronRight, Menu, X
+  ChevronLeft, ChevronRight, Menu, X, BookOpen
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,7 @@ const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/sessions/new', label: 'New Session', icon: Plus },
   { path: '/agents', label: 'Agents', icon: Bot },
+  { path: '/docs', label: 'Docs', icon: BookOpen },
 ];
 
 export default function Layout() {
