@@ -417,10 +417,17 @@ export default function SessionDetail() {
     const MARGIN_TOP = 18, MARGIN_BOTTOM = 22;
     let y = MARGIN_TOP;
 
+    // ── Core helpers ──────────────────────────────────────────────
     const checkPage = (needed = 10) => {
       if (y + needed > PAGE_H - MARGIN_BOTTOM) { doc.addPage(); y = MARGIN_TOP; }
     };
     const cleanMd = (t = '') => t.replace(/[*_#`>]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+
+    const SEV_COLORS = { CRITICAL: [220,38,38], HIGH: [234,88,12], MEDIUM: [202,138,4], LOW: [22,163,74] };
+    const sevColor = (s) => SEV_COLORS[s] || [120,120,120];
+    const scrsColor = (n) => n >= 80 ? [220,38,38] : n >= 60 ? [234,88,12] : n >= 40 ? [202,138,4] : [22,163,74];
+    const scrsLabel = (n) => n >= 80 ? 'CRITICAL' : n >= 60 ? 'HIGH' : n >= 40 ? 'MEDIUM' : 'LOW';
+
     const sectionHeader = (title) => {
       checkPage(18); y += 5;
       doc.setFillColor(22, 78, 162);
@@ -433,11 +440,136 @@ export default function SessionDetail() {
       doc.setFontSize(9); doc.setTextColor(22, 78, 162); doc.setFont('helvetica', 'bold');
       doc.text(title, ML, y); y += 5;
     };
-    const bodyText = (text, indent = 0) => {
+    const bodyText = (text, indent = 0, maxW = null) => {
       doc.setFontSize(8); doc.setTextColor(50, 50, 50); doc.setFont('helvetica', 'normal');
-      const lines = doc.splitTextToSize(cleanMd(text), CONTENT_W - indent);
+      const lines = doc.splitTextToSize(cleanMd(text), (maxW ?? CONTENT_W) - indent);
       lines.forEach(ln => { checkPage(5); doc.text(ln, ML + indent, y); y += 4.5; });
     };
+    const label = (text, x, yy, size = 7, color = [120,120,120], bold = false) => {
+      doc.setFontSize(size); doc.setTextColor(...color); doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.text(text, x, yy);
+    };
+
+    // ── Table helpers ─────────────────────────────────────────────
+    const drawTableHeader = (cols, colWidths, startX = ML) => {
+      const rowH = 7;
+      doc.setFillColor(22, 78, 162);
+      doc.rect(startX, y, colWidths.reduce((a,b)=>a+b,0), rowH, 'F');
+      doc.setFontSize(7.5); doc.setTextColor(255,255,255); doc.setFont('helvetica','bold');
+      let cx = startX;
+      cols.forEach((col, i) => {
+        doc.text(col, cx + 2.5, y + 4.8);
+        cx += colWidths[i];
+      });
+      y += rowH;
+    };
+    const drawTableRow = (cells, colWidths, opts = {}) => {
+      const { rowH = 7, altBg = false, cellColors = [] } = opts;
+      const startX = ML;
+      const totalW = colWidths.reduce((a,b)=>a+b,0);
+      if (altBg) { doc.setFillColor(248,250,255); doc.rect(startX, y, totalW, rowH, 'F'); }
+      doc.setDrawColor(220,225,230); doc.setLineWidth(0.2);
+      doc.rect(startX, y, totalW, rowH, 'S');
+      doc.setFontSize(7.5); doc.setFont('helvetica','normal');
+      let cx = startX;
+      cells.forEach((cell, i) => {
+        const cw = colWidths[i];
+        if (cellColors[i]) { doc.setTextColor(...cellColors[i]); doc.setFont('helvetica','bold'); }
+        else { doc.setTextColor(50,50,50); doc.setFont('helvetica','normal'); }
+        const txt = doc.splitTextToSize(String(cell ?? ''), cw - 4);
+        doc.text(txt[0] ?? '', cx + 2.5, y + 4.8);
+        cx += cw;
+      });
+      y += rowH;
+    };
+
+    // ── Gauge bar ─────────────────────────────────────────────────
+    const drawGaugeBar = (score, bx, by, bw, bh = 7) => {
+      const bands = [
+        { pct: 0.40, color: [22,163,74],  label: 'LOW' },
+        { pct: 0.20, color: [202,138,4],  label: 'MED' },
+        { pct: 0.20, color: [234,88,12],  label: 'HIGH' },
+        { pct: 0.20, color: [220,38,38],  label: 'CRIT' },
+      ];
+      let bxCur = bx;
+      bands.forEach(({ pct, color, label: bl }) => {
+        const sw = bw * pct;
+        doc.setFillColor(...color); doc.rect(bxCur, by, sw, bh, 'F');
+        doc.setFontSize(6); doc.setTextColor(255,255,255); doc.setFont('helvetica','bold');
+        if (sw > 12) doc.text(bl, bxCur + sw / 2 - doc.getTextWidth(bl) / 2, by + bh - 1.8);
+        bxCur += sw;
+      });
+      // Marker (downward-pointing triangle) at score position
+      const mx = bx + (score / 100) * bw;
+      doc.setFillColor(30,30,30);
+      doc.lines([[4,0],[-2,3],[-2,-3]], mx - 2, by - 1, [1,1], 'F', true);
+      // Score label
+      const sc = scrsColor(score);
+      doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(...sc);
+      const scoreStr = String(score);
+      const scoreW = doc.getTextWidth(scoreStr);
+      const labelX = Math.min(Math.max(mx - scoreW / 2, bx), bx + bw - scoreW);
+      doc.text(scoreStr, labelX, by - 3);
+      doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(...sc);
+      doc.text(scrsLabel(score), labelX + scoreW + 1.5, by - 3);
+    };
+
+    // ── Severity bar ──────────────────────────────────────────────
+    const drawSevBar = (counts, bx, by, bw, bh = 5) => {
+      const order = ['CRITICAL','HIGH','MEDIUM','LOW'];
+      const total = order.reduce((s,k) => s + (counts[k] || 0), 0);
+      if (total === 0) return;
+      let bxCur = bx;
+      order.forEach(k => {
+        if (!counts[k]) return;
+        const sw = bw * (counts[k] / total);
+        doc.setFillColor(...SEV_COLORS[k]); doc.rect(bxCur, by, sw, bh, 'F');
+        bxCur += sw;
+      });
+      // Legend
+      let lx = bx;
+      doc.setFontSize(6.5); doc.setFont('helvetica','normal');
+      order.filter(k => counts[k]).forEach(k => {
+        doc.setFillColor(...SEV_COLORS[k]); doc.rect(lx, by + bh + 2, 3, 3, 'F');
+        doc.setTextColor(60,60,60);
+        doc.text(`${k[0]}${k.slice(1).toLowerCase()} (${counts[k]})`, lx + 4.5, by + bh + 4.5);
+        lx += doc.getTextWidth(`${k[0]}${k.slice(1).toLowerCase()} (${counts[k]})`) + 9;
+      });
+    };
+
+    // ── Chain step diagram ────────────────────────────────────────
+    const drawChainSteps = (steps, bx, bw) => {
+      const circleR = 3.5, circleX = bx + circleR + 1;
+      steps.forEach((step, i) => {
+        const isLast = i === steps.length - 1;
+        checkPage(14);
+        // Circle
+        doc.setFillColor(22, 78, 162); doc.circle(circleX, y + circleR, circleR, 'F');
+        doc.setFontSize(7); doc.setTextColor(255,255,255); doc.setFont('helvetica','bold');
+        const num = String(step.step_number || i + 1);
+        doc.text(num, circleX - doc.getTextWidth(num) / 2, y + circleR + 2.2);
+        // Step text
+        doc.setFontSize(8); doc.setTextColor(50,50,50); doc.setFont('helvetica','normal');
+        const textX = bx + circleR * 2 + 5;
+        const lines = doc.splitTextToSize(step.step_text || '', bw - circleR * 2 - 6);
+        lines.forEach((ln, li) => doc.text(ln, textX, y + circleR + (li === 0 ? 2 : 0) + li * 4.5));
+        const stepH = Math.max(circleR * 2 + 2, lines.length * 4.5 + 3);
+        // Connector line
+        if (!isLast) {
+          doc.setDrawColor(180,190,210); doc.setLineWidth(0.5);
+          doc.line(circleX, y + circleR * 2 + 1, circleX, y + stepH + 1);
+        }
+        y += stepH + 2;
+      });
+    };
+
+    // ── Extract bullet lines from synthesis text ──────────────────
+    const extractBullets = (text = '', max = 3) => {
+      const lines = cleanMd(text).split('\n').map(l => l.trim()).filter(Boolean);
+      const bullets = lines.filter(l => /^[-•\d]/.test(l)).slice(0, max);
+      return bullets.length ? bullets : lines.slice(0, max);
+    };
+
     const addFooter = () => {
       const total = doc.getNumberOfPages();
       for (let p = 1; p <= total; p++) {
@@ -449,59 +581,306 @@ export default function SessionDetail() {
         doc.line(ML, PAGE_H - 12, PAGE_W - MR, PAGE_H - 12);
       }
     };
-    const SEV_COLORS = { CRITICAL: [220,38,38], HIGH: [234,88,12], MEDIUM: [202,138,4], LOW: [22,163,74] };
 
-    // ── Cover ─────────────────────────────────────────────────────
-    doc.setFillColor(15, 35, 70); doc.rect(0, 0, PAGE_W, 80, 'F');
-    doc.setFillColor(22, 78, 162); doc.rect(0, 70, PAGE_W, 6, 'F');
-    doc.setFontSize(9); doc.setTextColor(150, 190, 255); doc.setFont('helvetica', 'normal');
-    doc.text('SURFACE  ·  ADVERSARIAL RISK INTELLIGENCE', ML, 28);
-    y = 32;
+    const synth = sessionSynthesis;
+    const scrs = synth?.scrs_score ?? null;
+    const breakdown = v2SynthData?.scrs_breakdown ?? null;
+
+    // ── Page 1: Cover ─────────────────────────────────────────────
+    doc.setFillColor(15, 35, 70); doc.rect(0, 0, PAGE_W, PAGE_H, 'F');
+    doc.setFillColor(22, 78, 162); doc.rect(0, 90, PAGE_W, 5, 'F');
+    // Wordmark
+    doc.setFontSize(8); doc.setTextColor(150, 190, 255); doc.setFont('helvetica', 'normal');
+    doc.text('SURFACE  ·  ADVERSARIAL RISK INTELLIGENCE', ML, 30);
+    // Title
+    y = 42;
     doc.setFontSize(22); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold');
-    doc.splitTextToSize(session.title, CONTENT_W).forEach(line => { doc.text(line, ML, y + 14); y += 9; });
+    doc.splitTextToSize(session.title, CONTENT_W).forEach(line => { doc.text(line, ML, y); y += 10; });
+    // Subtitle
     doc.setFontSize(10); doc.setTextColor(180, 210, 255); doc.setFont('helvetica', 'normal');
-    doc.text('V2 Parallel Debate Report', ML, 66);
+    doc.text('V2 Parallel Debate Report', ML, 88);
+    // Metadata row
+    const dateStr = session.created_date ? new Date(session.created_date).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '';
+    const metaItems = [
+      dateStr,
+      session.mode ? session.mode.charAt(0).toUpperCase() + session.mode.slice(1) + ' mode' : '',
+      `${sessionAgents.length} agent${sessionAgents.length !== 1 ? 's' : ''}`,
+      `${sessionSynthesis?.compound_chains?.length ?? 0} compound chain${(sessionSynthesis?.compound_chains?.length ?? 0) !== 1 ? 's' : ''}`,
+    ].filter(Boolean);
+    doc.setFontSize(8); doc.setTextColor(150, 190, 255); doc.setFont('helvetica', 'normal');
+    doc.text(metaItems.join('  ·  '), ML, 100);
+    // SCRS block
+    if (scrs != null) {
+      const sc = scrsColor(scrs);
+      doc.setFillColor(20, 48, 100); doc.roundedRect(ML, 115, 80, 38, 3, 3, 'F');
+      doc.setFontSize(7); doc.setTextColor(150, 190, 255); doc.setFont('helvetica', 'normal');
+      doc.text('SYSTEMIC CRITICAL RISK SCORE', ML + 4, 122);
+      doc.setFontSize(32); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sc);
+      doc.text(String(scrs), ML + 4, 138);
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...sc);
+      doc.text(scrsLabel(scrs), ML + 4 + doc.getTextWidth(String(scrs)) + 3, 138);
+      // Mini gauge on cover
+      drawGaugeBar(scrs, ML + 4, 143, 68, 5);
+    }
     doc.addPage(); y = MARGIN_TOP;
 
-    // ── Scenario ──────────────────────────────────────────────────
+    // ── Page 2: Executive Summary ─────────────────────────────────
+    sectionHeader('Executive Summary');
+    y += 2;
+
+    // SCRS gauge + breakdown (left ~100mm)
+    if (scrs != null) {
+      const sc = scrsColor(scrs);
+      // Gauge bar
+      label('RISK POSTURE', ML, y, 7, [100,100,120], true); y += 4;
+      drawGaugeBar(scrs, ML, y, 100, 7); y += 15;
+      // Band reference chips
+      [['LOW','0–39',[22,163,74]],['MEDIUM','40–59',[202,138,4]],['HIGH','60–79',[234,88,12]],['CRITICAL','80–100',[220,38,38]]].forEach(([bl, br, bc], i) => {
+        const chipX = ML + i * 27;
+        doc.setFillColor(...bc.map(v => Math.min(255, v + 160))); doc.roundedRect(chipX, y, 24, 5, 1, 1, 'F');
+        doc.setFontSize(6); doc.setTextColor(...bc); doc.setFont('helvetica','bold');
+        doc.text(bl, chipX + 2, y + 3.5);
+        doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+        doc.text(br, chipX + 2, y + 8);
+      });
+      y += 14;
+
+      // Breakdown table
+      if (breakdown) {
+        label('SCORE BREAKDOWN', ML, y, 7, [100,100,120], true); y += 4;
+        const bRows = [
+          ['Base score (severity × expertise)', String(Math.round(breakdown.baseScore ?? 0))],
+          ['Resilience modifier (compound chains)', String(Math.round(breakdown.resilienceModifier ?? 0))],
+          ['Countermeasure modifier', String(Math.round(breakdown.countermeasureModifier ?? 0))],
+          ['Final SCRS', String(scrs)],
+        ];
+        drawTableHeader(['Component', 'Points'], [130, 24]);
+        bRows.forEach((row, i) => {
+          const isFinal = i === bRows.length - 1;
+          drawTableRow(row, [130, 24], {
+            altBg: i % 2 === 0,
+            cellColors: isFinal ? [null, sc] : [],
+          });
+        });
+        y += 3;
+      }
+    }
+
+    // Severity distribution bar
+    {
+      const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+      sessionAgents.forEach(r => {
+        const s = r.round2_revised_severity || r.round1_severity;
+        if (s && counts[s] !== undefined) counts[s]++;
+      });
+      const total = Object.values(counts).reduce((a,b)=>a+b,0);
+      if (total > 0) {
+        checkPage(22);
+        label('AGENT SEVERITY DISTRIBUTION', ML, y, 7, [100,100,120], true); y += 4;
+        drawSevBar(counts, ML, y, CONTENT_W, 6); y += 18;
+      }
+    }
+
+    // Key findings + priority actions columns (right side of page, back-filled)
+    if (synth) {
+      const colX = ML + 106, colW = CONTENT_W - 106;
+      let savedY = y;
+      // We'll write these in a second pass after the left column by tracking page state
+      // Instead, write them sequentially after left-column content
+      checkPage(20);
+      label('KEY FINDINGS', ML, y, 7, [100,100,120], true); y += 4;
+      extractBullets(synth.consensus_findings, 3).forEach(b => {
+        checkPage(10);
+        doc.setFillColor(22, 78, 162); doc.rect(ML, y - 2.5, 2, 3.5, 'F');
+        doc.setFontSize(8); doc.setTextColor(40,40,40); doc.setFont('helvetica','normal');
+        const lines = doc.splitTextToSize(b.replace(/^[-•\d.]+\s*/, ''), CONTENT_W - 6);
+        lines.forEach((ln, li) => { if (li > 0) checkPage(5); doc.text(ln, ML + 5, y + li * 4.5); });
+        y += lines.length * 4.5 + 2;
+      });
+      y += 2;
+      label('PRIORITY ACTIONS', ML, y, 7, [100,100,120], true); y += 4;
+      extractBullets(synth.priority_mitigations, 3).forEach((b, bi) => {
+        checkPage(10);
+        doc.setFillColor(...(bi === 0 ? [220,38,38] : bi === 1 ? [234,88,12] : [202,138,4]));
+        doc.roundedRect(ML, y - 2.5, 3, 4, 0.5, 0.5, 'F');
+        doc.setFontSize(8); doc.setTextColor(40,40,40); doc.setFont('helvetica','normal');
+        const lines = doc.splitTextToSize(b.replace(/^[-•\d.]+\s*/, ''), CONTENT_W - 6);
+        lines.forEach((ln, li) => { if (li > 0) checkPage(5); doc.text(ln, ML + 6, y + li * 4.5); });
+        y += lines.length * 4.5 + 2;
+      });
+    }
+    y += 4;
+
+    // ── Page 3: Agent Roster ──────────────────────────────────────
+    checkPage(40);
+    sectionHeader('Agent Roster');
+    const rosterCols = ['Name', 'Team', 'Discipline', 'R1 Severity', 'R2 Severity'];
+    const rosterWidths = [42, 20, 48, 32, 32];
+    drawTableHeader(rosterCols, rosterWidths);
+    sessionAgents.forEach((sa, i) => {
+      const r1c = sevColor(sa.round1_severity);
+      const r2sev = sa.round2_revised_severity || sa.round1_severity;
+      const r2c = sevColor(r2sev);
+      const teamColor = sa.team === 'red' ? [220,38,38] : [37,99,235];
+      const shift = sa.round2_revised_severity && sa.round2_revised_severity !== sa.round1_severity
+        ? (sa.round2_revised_severity === 'CRITICAL' || sa.round2_revised_severity === 'HIGH' ? ' ↑' : ' ↓') : '';
+      drawTableRow(
+        [sa.agent_name || sa.agent_id, (sa.team || '').toUpperCase(), sa.discipline || '—', sa.round1_severity || '—', (r2sev || '—') + shift],
+        rosterWidths,
+        { altBg: i % 2 === 0, cellColors: [null, teamColor, null, r1c, r2c] }
+      );
+    });
+    y += 4;
+
+    // ── Pages 4+: Scenario ────────────────────────────────────────
     sectionHeader('Scenario');
     bodyText(session.scenario);
     y += 3;
 
-    // ── Agent Assessments ─────────────────────────────────────────
+    // ── Agent Debate ──────────────────────────────────────────────
     if (sessionAgents.length > 0) {
       sectionHeader('Round 1 — Independent Assessments');
       sessionAgents.forEach(sa => {
-        const sc = SEV_COLORS[sa.round1_severity] || [100,100,100];
-        subHeader(`${sa.agent_name || sa.agent_id} (${(sa.team || '').toUpperCase()})${sa.round1_severity ? ` — ${sa.round1_severity}` : ''}`);
-        if (sa.round1_assessment) bodyText(sa.round1_assessment, 4);
+        checkPage(28);
+        const teamColor = sa.team === 'red' ? [220,38,38] : [37,99,235];
+        const sc = sevColor(sa.round1_severity);
+        // Left border strip
+        const agentStartY = y;
+        // Agent name header
         y += 2;
+        doc.setFillColor(...teamColor.map(v => Math.min(255, v + 185)));
+        doc.roundedRect(ML, y - 2, CONTENT_W, 8, 1, 1, 'F');
+        doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(...teamColor);
+        doc.text(sa.agent_name || sa.agent_id, ML + 3, y + 3.5);
+        // Team + severity chips
+        const teamLabel = (sa.team || '').toUpperCase();
+        const chipX = PAGE_W - MR - 38;
+        doc.setFontSize(7); doc.setFont('helvetica','bold');
+        doc.setTextColor(...teamColor);
+        doc.text(teamLabel, chipX, y + 3.5);
+        if (sa.round1_severity) {
+          doc.setTextColor(...sc);
+          doc.text(sa.round1_severity, chipX + 18, y + 3.5);
+        }
+        y += 10;
+        if (sa.round1_assessment) bodyText(sa.round1_assessment, 3);
+        // Left border
+        doc.setFillColor(...teamColor); doc.rect(ML, agentStartY + 2, 1.5, y - agentStartY - 2, 'F');
+        y += 4;
       });
+
       sectionHeader('Round 2 — Rebuttals');
       sessionAgents.filter(sa => sa.round2_rebuttal).forEach(sa => {
+        checkPage(28);
+        const teamColor = sa.team === 'red' ? [220,38,38] : [37,99,235];
+        const r2sev = sa.round2_revised_severity || sa.round1_severity;
+        const sc = sevColor(r2sev);
         const shift = sa.round2_revised_severity && sa.round2_revised_severity !== sa.round1_severity
           ? ` → ${sa.round2_revised_severity}` : '';
-        subHeader(`${sa.agent_name || sa.agent_id}${sa.round2_revised_severity ? ` — ${sa.round2_revised_severity}${shift}` : ''}`);
-        bodyText(sa.round2_rebuttal, 4);
+        const agentStartY = y;
         y += 2;
+        doc.setFillColor(...teamColor.map(v => Math.min(255, v + 185)));
+        doc.roundedRect(ML, y - 2, CONTENT_W, 8, 1, 1, 'F');
+        doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(...teamColor);
+        doc.text(sa.agent_name || sa.agent_id, ML + 3, y + 3.5);
+        if (shift) {
+          doc.setFontSize(7); doc.setTextColor(...sc);
+          doc.text(`Severity revised${shift}`, PAGE_W - MR - 46, y + 3.5);
+        }
+        y += 10;
+        bodyText(sa.round2_rebuttal, 3);
+        doc.setFillColor(...teamColor); doc.rect(ML, agentStartY + 2, 1.5, y - agentStartY - 2, 'F');
+        y += 4;
       });
     }
 
-    // ── Synthesis ─────────────────────────────────────────────────
-    if (sessionSynthesis) {
-      const synth = sessionSynthesis;
+    // ── Synthesis Sections ────────────────────────────────────────
+    if (synth) {
       if (synth.consensus_findings) { sectionHeader('Consensus Findings'); bodyText(synth.consensus_findings); y += 2; }
       if (synth.contested_findings) { sectionHeader('Contested Findings'); bodyText(synth.contested_findings); y += 2; }
       if (synth.blind_spots) { sectionHeader('Blind Spots'); bodyText(synth.blind_spots); y += 2; }
       if (synth.priority_mitigations) { sectionHeader('Priority Mitigations'); bodyText(synth.priority_mitigations); y += 2; }
       if (synth.sharpest_insights) { sectionHeader('Sharpest Insights'); bodyText(synth.sharpest_insights); y += 2; }
-      if (synth.scrs_score != null) {
-        sectionHeader('SCRS Risk Score');
-        doc.setFontSize(28); doc.setFont('helvetica', 'bold');
-        const sc = synth.scrs_score >= 70 ? [220,38,38] : synth.scrs_score >= 40 ? [234,88,12] : [22,163,74];
-        doc.setTextColor(...sc);
-        doc.text(String(synth.scrs_score), ML, y + 14); y += 20;
+
+      // Compound chains as step diagrams
+      if (synth.compound_chains?.length > 0) {
+        sectionHeader('Compound Threat Chains');
+        synth.compound_chains.forEach((chain, ci) => {
+          checkPage(24);
+          subHeader(`Chain ${ci + 1}: ${chain.name || `Unnamed Chain ${ci + 1}`}`);
+          if (chain.steps?.length) drawChainSteps(chain.steps, ML + 4, CONTENT_W - 8);
+          y += 4;
+        });
       }
+    }
+
+    // ── Chain Break Analysis ──────────────────────────────────────
+    if (chainBreakData?.length > 0) {
+      sectionHeader('Chain Break Analysis');
+      const RES_COLORS = { HIGH: [220,38,38], MEDIUM: [202,138,4], LOW: [22,163,74] };
+      const LEV_COLORS = { HIGH: [220,38,38], MEDIUM: [202,138,4], LOW: [22,163,74] };
+      chainBreakData.forEach((ca, ci) => {
+        checkPage(30);
+        const chainChain = synth?.compound_chains?.[ci];
+        const resilience = (ca.chain_resilience || 'MEDIUM').toUpperCase();
+        const rc = RES_COLORS[resilience] || [120,120,120];
+        // Chain name + resilience badge
+        y += 2;
+        doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(22, 78, 162);
+        doc.text(`${chainChain?.name || ca.chain_name || `Chain ${ci + 1}`}`, ML, y);
+        // Resilience badge (right-aligned)
+        const badgeLabel = `${resilience} RESILIENCE`;
+        const badgeW = doc.getTextWidth(badgeLabel) + 6;
+        doc.setFillColor(...rc.map(v => Math.min(255, v + 170))); doc.roundedRect(PAGE_W - MR - badgeW, y - 4, badgeW, 6, 1, 1, 'F');
+        doc.setFontSize(7); doc.setTextColor(...rc); doc.setFont('helvetica','bold');
+        doc.text(badgeLabel, PAGE_W - MR - badgeW + 3, y - 0.5);
+        y += 4;
+        if (ca.resilience_rationale) { doc.setFontSize(7.5); doc.setTextColor(90,90,90); doc.setFont('helvetica','normal'); bodyText(ca.resilience_rationale); }
+        y += 2;
+        // Steps with mitigations
+        (ca.steps || []).forEach(caStep => {
+          checkPage(22);
+          const srcStep = chainChain?.steps?.find(s => s.step_number === caStep.step_number);
+          const leverage = (caStep.leverage || 'MEDIUM').toUpperCase();
+          const lc = LEV_COLORS[leverage] || [120,120,120];
+          // Step number + text
+          doc.setFillColor(22, 78, 162); doc.circle(ML + 3.5, y + 3.5, 3.5, 'F');
+          doc.setFontSize(7); doc.setTextColor(255,255,255); doc.setFont('helvetica','bold');
+          const sn = String(caStep.step_number);
+          doc.text(sn, ML + 3.5 - doc.getTextWidth(sn)/2, y + 5.5);
+          if (srcStep?.step_text) {
+            doc.setFontSize(8); doc.setTextColor(50,50,50); doc.setFont('helvetica','normal');
+            const stLines = doc.splitTextToSize(srcStep.step_text, CONTENT_W - 12);
+            stLines.forEach((ln, li) => doc.text(ln, ML + 10, y + 3 + li * 4.5));
+            y += stLines.length * 4.5 + 4;
+          } else { y += 9; }
+          // Mitigation card (light background)
+          const cardH = 18 + (caStep.mitigation_description ? 8 : 0);
+          checkPage(cardH);
+          doc.setFillColor(248,250,255); doc.roundedRect(ML + 8, y, CONTENT_W - 10, cardH, 1.5, 1.5, 'F');
+          doc.setDrawColor(...lc); doc.setLineWidth(0.4); doc.line(ML + 8, y, ML + 8, y + cardH);
+          // Leverage badge
+          doc.setFillColor(...lc.map(v => Math.min(255, v + 170))); doc.roundedRect(ML + 11, y + 2, 22, 4.5, 0.8, 0.8, 'F');
+          doc.setFontSize(6); doc.setTextColor(...lc); doc.setFont('helvetica','bold');
+          doc.text(`${leverage} LEVERAGE`, ML + 13, y + 5.2);
+          // Mitigation title
+          doc.setFontSize(8); doc.setTextColor(30,30,30); doc.setFont('helvetica','bold');
+          doc.text(caStep.mitigation_title || '', ML + 36, y + 5.5);
+          if (caStep.mitigation_description) {
+            doc.setFontSize(7.5); doc.setTextColor(70,70,70); doc.setFont('helvetica','normal');
+            const descLines = doc.splitTextToSize(caStep.mitigation_description, CONTENT_W - 22);
+            descLines.slice(0,2).forEach((ln, li) => doc.text(ln, ML + 11, y + 12 + li * 4.5));
+          }
+          // Owner · timeline footer
+          const footer = [caStep.mitigation_owner, caStep.mitigation_timeline].filter(Boolean).join(' · ');
+          if (footer) {
+            doc.setFontSize(7); doc.setTextColor(120,120,120); doc.setFont('helvetica','normal');
+            doc.text(footer, ML + 11, y + cardH - 2);
+          }
+          y += cardH + 4;
+        });
+        y += 4;
+      });
     }
 
     addFooter();
