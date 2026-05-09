@@ -10,7 +10,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2, CheckCircle2, Circle } from 'lucide-react';
+import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2, CheckCircle2, Circle, Swords } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import DebateRound, { DebateRoundV2 } from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
@@ -19,8 +19,9 @@ import MitigationTable from '@/components/session/MitigationTable';
 import MitigationPlaybook from '@/components/session/MitigationPlaybook';
 import DebateRoster from '@/components/session/DebateRoster';
 import SynthesisReport from '@/components/session/SynthesisReport';
+import ChainBreaker from '@/components/session/ChainBreaker';
 import ReactMarkdown from 'react-markdown';
-import { buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, formatOthersAssessments, resolveAgent, extractSynthesisSections } from '@/lib/agentData';
+import { buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, formatOthersAssessments, resolveAgent, extractSynthesisSections, buildChainBreakPrompt } from '@/lib/agentData';
 import { asyncPool } from '@/lib/asyncPool';
 import { computeSCRS } from '@/lib/scrsEngine';
 
@@ -53,6 +54,8 @@ export default function SessionDetail() {
     return () => clearInterval(t);
   }, [debateStartTime]);
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
+  const [generatingChainBreaker, setGeneratingChainBreaker] = useState(false);
+  const [appliedSteps, setAppliedSteps] = useState(new Set());
 
   const deleteMutation = useMutation({
     mutationFn: () => base44.entities.Session.delete(id),
@@ -117,6 +120,32 @@ export default function SessionDetail() {
   } : null;
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
+
+  // ── Chain Break / SCRS simulator ─────────────────────────────────────────────
+  const chainBreakData = v2SynthData?.chain_analyses || null;
+
+  const chainAnalysesForScrs = (chainBreakData || []).map(ca => ({
+    chain_resilience: (ca.chain_resilience || 'MEDIUM').toUpperCase(),
+    steps: (ca.steps || []).map(s => ({ leverage: (s.leverage || 'MEDIUM').toUpperCase() })),
+  }));
+
+  const scrsBaseParams = {
+    sessionAgents: sessionAgents.map(r => ({
+      ...r,
+      agent: agents.find(a => a.id === r.agent_id) || {},
+    })),
+    chainAnalyses: chainAnalysesForScrs,
+    appliedCMs: [],
+  };
+
+  const appliedCMsList = [...appliedSteps].map(key => {
+    const [ci, si] = key.split('-').map(Number);
+    return { leverage: (chainBreakData?.[ci]?.steps?.[si]?.leverage || 'MEDIUM').toUpperCase() };
+  });
+
+  const projectedResult = chainBreakData
+    ? computeSCRS({ ...scrsBaseParams, appliedCMs: appliedCMsList })
+    : null;
 
   const runDebateMutation = useMutation({
     mutationFn: async () => {
@@ -332,6 +361,31 @@ export default function SessionDetail() {
     await base44.entities.Session.update(id, { mitigation_playbook: playbook });
     queryClient.invalidateQueries({ queryKey: ['session', id] });
     setGeneratingPlaybook(false);
+  };
+
+  const handleGenerateChainBreaker = async () => {
+    setGeneratingChainBreaker(true);
+    try {
+      const chains = sessionSynthesis?.compound_chains || [];
+      const { prompt, response_json_schema } = buildChainBreakPrompt(chains, session.scenario || '');
+      const result = await base44.integrations.Core.InvokeLLM({ prompt, response_json_schema });
+
+      // Fetch existing V2 JSON, merge chain_analyses in, re-upload
+      const currentUrl = session.executive_summary?.startsWith('v2url:')
+        ? session.executive_summary.slice(6) : null;
+      let existing = {};
+      if (currentUrl) {
+        try { existing = await fetch(currentUrl).then(r => r.json()); } catch {}
+      }
+      const updated = { ...existing, chain_analyses: result?.chain_analyses || [] };
+      const jsonFile = new File([JSON.stringify(updated)], `v2-${id}.json`, { type: 'application/json' });
+      const { file_url } = await base44.integrations.Core.UploadFile({ file: jsonFile });
+      await base44.entities.Session.update(id, { executive_summary: `v2url:${file_url}` });
+      queryClient.invalidateQueries({ queryKey: ['session', id] });
+      setAppliedSteps(new Set());
+    } finally {
+      setGeneratingChainBreaker(false);
+    }
   };
 
   const handleExportPDFV2 = async () => {
@@ -1424,37 +1478,31 @@ export default function SessionDetail() {
               )}
             </TabsContent>
 
-            <TabsContent value="chains" className="mt-4">
+            <TabsContent value="chains" className="mt-4 space-y-4">
+              {isV2 && session.status === 'completed' && !chainBreakData && (
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" onClick={handleGenerateChainBreaker}
+                    disabled={generatingChainBreaker} className="gap-2 border-primary/40 text-primary hover:bg-primary/5">
+                    {generatingChainBreaker ? <Loader2 className="w-4 h-4 animate-spin" /> : <Swords className="w-4 h-4" />}
+                    {generatingChainBreaker ? 'Analysing chains…' : 'Generate Chain Break Analysis'}
+                  </Button>
+                </div>
+              )}
               {isV2 ? (
-                sessionSynthesis?.compound_chains?.length
-                  ? (
-                    <div className="space-y-4">
-                      {sessionSynthesis.compound_chains.map((chain, ci) => (
-                        <Card key={ci} className="overflow-hidden">
-                          <div className="px-6 py-3 border-b border-border bg-muted/30">
-                            <h4 className="text-sm font-semibold">{chain.name}</h4>
-                          </div>
-                          <div className="p-5 space-y-3">
-                            {(chain.steps || []).map((step, si) => {
-                              const isLast = si === chain.steps.length - 1;
-                              return (
-                                <div key={si} className="flex items-start gap-3">
-                                  <div className="flex flex-col items-center flex-shrink-0">
-                                    <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary">
-                                      {step.step_number || si + 1}
-                                    </div>
-                                    {!isLast && <div className="w-px h-4 bg-border mt-1" />}
-                                  </div>
-                                  <p className="text-sm text-foreground leading-relaxed pt-1 pb-2">{step.step_text}</p>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  )
-                  : <Card className="p-8 text-center"><p className="text-muted-foreground">No compound chains identified</p></Card>
+                <ChainBreaker
+                  chainBreakData={chainBreakData}
+                  chains={sessionSynthesis?.compound_chains || []}
+                  appliedSteps={appliedSteps}
+                  onToggle={(key) => setAppliedSteps(prev => {
+                    const next = new Set(prev);
+                    next.has(key) ? next.delete(key) : next.add(key);
+                    return next;
+                  })}
+                  currentScrs={v2SynthData?.scrs_score}
+                  projectedScrs={projectedResult?.scrs}
+                  scrsBaseParams={scrsBaseParams}
+                  chainAnalysesForScrs={chainAnalysesForScrs}
+                />
               ) : (
                 <ChainDiagram chains={session.attack_chains} />
               )}
