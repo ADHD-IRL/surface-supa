@@ -10,7 +10,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2, CheckCircle2, Circle, Swords } from 'lucide-react';
+import { ArrowLeft, Play, FileDown, Loader2, BookOpen, GitBranch, Trash2, CheckCircle2, Circle, Swords, MoreHorizontal } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import DebateRound, { DebateRoundV2 } from '@/components/session/DebateRound';
 import RiskHeatmap from '@/components/session/RiskHeatmap';
@@ -53,6 +54,9 @@ export default function SessionDetail() {
     const t = setInterval(() => setElapsedSecs(Math.floor((Date.now() - debateStartTime) / 1000)), 1000);
     return () => clearInterval(t);
   }, [debateStartTime]);
+  const [phaseTimings, setPhaseTimings] = useState({ r1: null, r2: null, synthesis: null });
+  const [phaseStarts, setPhaseStarts] = useState({});
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
   const [generatingChainBreaker, setGeneratingChainBreaker] = useState(false);
   const [appliedSteps, setAppliedSteps] = useState(new Set());
@@ -190,6 +194,8 @@ export default function SessionDetail() {
 
       // ── Phase 1: R1 — sequential (base44 InvokeLLM may not support concurrent calls) ──
       setRunningStep('Round 1 — Independent assessments');
+      const r1Start = Date.now();
+      setPhaseStarts(p => ({ ...p, r1: r1Start }));
       await asyncPool(1, resolvedAgents, async (agent) => {
         setRunningAgents(prev => prev && ({
           ...prev,
@@ -217,7 +223,8 @@ export default function SessionDetail() {
         }));
       });
 
-      // No mid-run persist for R1 — progress is tracked via runningAgents local state
+      const fmtDur = (ms) => ms >= 60000 ? `${Math.floor(ms/60000)}m ${Math.round((ms%60000)/1000)}s` : `${Math.round(ms/1000)}s`;
+      setPhaseTimings(p => ({ ...p, r1: fmtDur(Date.now() - r1Start) }));
 
       // ── Phase 2: R2 — all agents in parallel ───────────────────────────────
       setRunningStep('Round 2 — Rebuttals');
@@ -251,7 +258,8 @@ export default function SessionDetail() {
         }));
       });
 
-      // No mid-run persist for R2 — progress tracked via runningAgents local state
+      const r2Start = Date.now();
+      setPhaseTimings(p => ({ ...p, r2: fmtDur(r2Start - r1Start) }));
 
       // ── Phase 3: Synthesis ─────────────────────────────────────────────────
       setRunningStep('Generating synthesis...');
@@ -311,6 +319,7 @@ export default function SessionDetail() {
       });
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });
+      setPhaseTimings(p => ({ ...p, synthesis: fmtDur(Date.now() - r2Start) }));
       setRunningStep('');
       setRunningAgents(null);
       setDebateStartTime(null);
@@ -1008,102 +1017,207 @@ export default function SessionDetail() {
 
   const config = statusConfig[session.status] || statusConfig.draft;
 
+  // ── Derived header values ─────────────────────────────────────────────────
+  const scrsScore = v2SynthData?.scrs_score ?? null;
+  const scrsLabel = scrsScore == null ? '' : scrsScore >= 80 ? 'CRITICAL' : scrsScore >= 60 ? 'HIGH' : scrsScore >= 40 ? 'MEDIUM' : 'LOW';
+  const scrsColor = scrsScore == null ? '' : scrsScore >= 80 ? '#dc2626' : scrsScore >= 60 ? '#ea580c' : scrsScore >= 40 ? '#ca8a04' : '#16a34a';
+  const sevShiftsUp = sessionAgents.filter(r => {
+    const sev = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+    return r.round2_revised_severity && r.round1_severity &&
+      (sev[r.round2_revised_severity] || 0) > (sev[r.round1_severity] || 0);
+  }).length;
+  const sevShiftsDown = sessionAgents.filter(r => {
+    const sev = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+    return r.round2_revised_severity && r.round1_severity &&
+      (sev[r.round2_revised_severity] || 0) < (sev[r.round1_severity] || 0);
+  }).length;
+  const chainCount = sessionSynthesis?.compound_chains?.length ?? session.attack_chains?.length ?? 0;
+  const sessionAgentCount = session.selected_agents?.length || agents.length;
+
   return (
     <div className="p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back
-          </Link>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{session.title}</h1>
-            <Badge variant="outline" className={cn("text-xs", config.className)}>
-              {session.status === 'running' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
-              {config.label}
-            </Badge>
-          </div>
+      {/* Header — V2 hierarchy design */}
+      <div className="space-y-4">
+        {/* Breadcrumb */}
+        <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to dashboard
+        </Link>
+
+        {/* Metadata line */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-mono uppercase tracking-wider">Session</span>
+          {session.mode && (
+            <><span>·</span><span className="capitalize">{session.mode}</span></>
+          )}
+          {sessionAgentCount > 0 && (
+            <><span>·</span><span>{sessionAgentCount} agent{sessionAgentCount !== 1 ? 's' : ''}</span></>
+          )}
           {session.parent_session_id && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <GitBranch className="w-3 h-3 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Re-run of </span>
+            <>
+              <span>·</span>
+              <GitBranch className="w-3 h-3" />
+              <span>Re-run of</span>
               <Link
                 to={`/sessions/${session.parent_session_id}`}
-                className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                className="underline underline-offset-2 hover:text-foreground"
               >
                 {session.parent_session_title || 'original session'}
               </Link>
+            </>
+          )}
+        </div>
+
+        {/* Title + SCRS card */}
+        <div className="flex items-start gap-6">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
+              <h1 className="text-[26px] font-bold tracking-tight leading-tight">{session.title}</h1>
+              <Badge variant="outline" className={cn("text-xs", config.className)}>
+                {session.status === 'running' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                {config.label}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">{session.scenario}</p>
+          </div>
+
+          {/* SCRS hero card — completed V2 sessions only */}
+          {isV2 && session.status === 'completed' && scrsScore != null && (
+            <div className="shrink-0 rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-5 shadow-sm">
+              {/* Gauge ring */}
+              <div className="relative" style={{ width: 72, height: 72 }}>
+                <div
+                  className="rounded-full"
+                  style={{
+                    width: 72, height: 72,
+                    background: `conic-gradient(${scrsColor} ${scrsScore}%, hsl(var(--muted)) 0)`,
+                  }}
+                >
+                  <div className="absolute inset-1.5 bg-card rounded-full flex flex-col items-center justify-center">
+                    <div className="text-base font-bold leading-none tabular-nums" style={{ color: scrsColor }}>{scrsScore}</div>
+                    <div className="text-[8px] uppercase tracking-wider text-muted-foreground mt-0.5">scrs</div>
+                  </div>
+                </div>
+              </div>
+              <div className="border-l border-border pl-5 space-y-2 leading-tight">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk posture</div>
+                  <div className="text-sm font-semibold mt-0.5" style={{ color: scrsColor }}>{scrsLabel}</div>
+                </div>
+                {(sevShiftsUp > 0 || sevShiftsDown > 0) && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Severity shifts</div>
+                    <div className="text-sm font-semibold mt-0.5">{sevShiftsUp} ↑ &nbsp; {sevShiftsDown} ↓</div>
+                  </div>
+                )}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Compound chains</div>
+                  <div className="text-sm font-semibold mt-0.5">{chainCount} found</div>
+                </div>
+              </div>
             </div>
           )}
-          <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{session.scenario}</p>
         </div>
-        <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
-          {session.status === 'draft' && (
-            <Button onClick={() => runDebateMutation.mutate()} disabled={runDebateMutation.isPending} className="gap-2">
-              <Play className="w-4 h-4" /> Run Analysis
-            </Button>
-          )}
-          {(session.status === 'completed' || session.status === 'failed') && (
-            <Button
-              variant="outline"
-              onClick={() => navigate('/sessions/new', { state: { template: session } })}
-              className="gap-2"
-            >
-              <GitBranch className="w-4 h-4" /> Edit & Re-run
-            </Button>
-          )}
-          {!isV2 && session.status === 'completed' && !session.mitigation_playbook && (
-            <Button
-              variant="outline"
-              onClick={handleGeneratePlaybook}
-              disabled={generatingPlaybook}
-              className="gap-2 border-green-team/40 text-green-team hover:bg-green-team/5"
-            >
-              {generatingPlaybook
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <BookOpen className="w-4 h-4" />}
-              {generatingPlaybook ? 'Generating...' : 'Generate Playbook'}
-            </Button>
-          )}
-          {session.status === 'completed' && (
-            <Button variant="outline" onClick={isV2 ? handleExportPDFV2 : handleExportPDF} className="gap-2">
-              <FileDown className="w-4 h-4" /> Export PDF
-            </Button>
-          )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
+
+        {/* Actions bar */}
+        <div className="flex items-center justify-between border-y border-border py-2.5">
+          <div className="flex items-center gap-2">
+            {session.status === 'draft' && (
+              <Button onClick={() => runDebateMutation.mutate()} disabled={runDebateMutation.isPending} className="gap-2">
+                {runDebateMutation.isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Play className="w-4 h-4" />}
+                Run Analysis
+              </Button>
+            )}
+            {session.status === 'completed' && (
+              <Button onClick={isV2 ? handleExportPDFV2 : handleExportPDF} className="gap-2">
+                <FileDown className="w-4 h-4" /> Export PDF
+              </Button>
+            )}
+            {(session.status === 'completed' || session.status === 'failed') && (
               <Button
                 variant="outline"
-                className="gap-2 border-red-team/30 text-red-team hover:bg-red-team/5 hover:border-red-team/50"
-                disabled={deleteMutation.isPending}
+                onClick={() => navigate('/sessions/new', { state: { template: session } })}
+                className="gap-2"
               >
-                {deleteMutation.isPending
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <Trash2 className="w-4 h-4" />}
-                Delete
+                <GitBranch className="w-4 h-4" /> Edit & Re-run
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete session?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete <span className="font-medium text-foreground">"{session.title}"</span> and
-                  all its artifacts — debate rounds, risk registry, attack chains, and any generated playbook.
-                  This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => deleteMutation.mutate()}
-                  className="bg-red-team text-white hover:bg-red-team/90"
+            )}
+            {/* ··· overflow menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {!isV2 && session.status === 'completed' && !session.mitigation_playbook && (
+                  <DropdownMenuItem
+                    onClick={handleGeneratePlaybook}
+                    disabled={generatingPlaybook}
+                    className="gap-2"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    {generatingPlaybook ? 'Generating playbook…' : 'Generate Playbook'}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => setDeleteDialogOpen(true)}
+                  disabled={deleteMutation.isPending}
+                  className="gap-2 text-destructive focus:text-destructive"
                 >
+                  <Trash2 className="w-4 h-4" />
                   Delete session
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div className="text-xs text-muted-foreground font-mono hidden sm:block">
+            {session.id?.slice(-8).toUpperCase()}
+          </div>
         </div>
+
+        {/* Delete confirmation dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete session?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <span className="font-medium text-foreground">"{session.title}"</span> and
+                all its artifacts. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => { setDeleteDialogOpen(false); deleteMutation.mutate(); }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete session
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Run lineage strip — shown after completion */}
+        {session.status === 'completed' && isV2 && (phaseTimings.r1 || phaseTimings.r2 || phaseTimings.synthesis) && (
+          <div className="rounded-md border border-border bg-card px-4 py-2.5 flex items-center gap-4 text-xs">
+            {[
+              ['R1 Assessment', phaseTimings.r1],
+              ['R2 Rebuttal',   phaseTimings.r2],
+              ['Synthesis',     phaseTimings.synthesis],
+            ].map(([label, dur], i, arr) => (
+              <React.Fragment key={label}>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-team flex-shrink-0" />
+                  <span className="font-medium text-foreground">{label}</span>
+                  {dur && <span className="text-muted-foreground tabular-nums">{dur}</span>}
+                </div>
+                {i < arr.length - 1 && <div className="flex-1 h-px bg-green-team/30" />}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Running status */}
@@ -1351,16 +1465,16 @@ export default function SessionDetail() {
       {/* Content Tabs */}
       <Tabs defaultValue={session.status === 'completed' ? 'report' : 'debate'}>
         <TabsList>
-          <TabsTrigger value="debate">Debate</TabsTrigger>
           {session.status === 'completed' && (
             <>
               <TabsTrigger value="report">Report</TabsTrigger>
               <TabsTrigger value="risks">{isV2 ? 'Mitigations' : 'Risks'}</TabsTrigger>
               <TabsTrigger value="chains">Chains</TabsTrigger>
-              {!isV2 && session.mitigation_playbook && (
-                <TabsTrigger value="playbook">Playbook</TabsTrigger>
-              )}
             </>
+          )}
+          <TabsTrigger value="debate">Debate</TabsTrigger>
+          {session.status === 'completed' && !isV2 && session.mitigation_playbook && (
+            <TabsTrigger value="playbook">Playbook</TabsTrigger>
           )}
         </TabsList>
 
