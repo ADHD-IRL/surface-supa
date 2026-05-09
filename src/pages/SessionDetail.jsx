@@ -120,13 +120,17 @@ export default function SessionDetail() {
 
   const sessionSynthesis = v2SynthData ? {
     ...v2SynthData,
-    compound_chains: (session?.attack_chains || []).map(c => ({
-      name: c.name,
-      steps: (c.steps || []).map((s, i) => ({
-        step_number: i + 1,
-        step_text: s.description || s.label || '',
-      })),
-    })),
+    // Prefer compound_chains from CDN JSON (full data); fall back to entity attack_chains
+    compound_chains: (v2SynthData.compound_chains?.length
+      ? v2SynthData.compound_chains
+      : (session?.attack_chains || []).map(c => ({
+          name: c.name,
+          steps: (c.steps || []).map((s, i) => ({
+            step_number: i + 1,
+            step_text: s.description || s.label || '',
+          })),
+        }))
+    ),
   } : null;
 
   const getAgent = useCallback((agentId) => agents.find(a => a.id === agentId), [agents]);
@@ -307,6 +311,7 @@ export default function SessionDetail() {
       const v2Payload = JSON.stringify({
         _v2: true,
         agent_results: agentResults,
+        compound_chains: sections.compound_chains || [],
         consensus_findings: sections.consensus_findings || '',
         contested_findings: sections.contested_findings || '',
         blind_spots: sections.blind_spots || '',
