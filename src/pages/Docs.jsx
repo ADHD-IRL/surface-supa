@@ -84,13 +84,14 @@ function SevBadge({ sev }) {
 // ── Table of contents ──────────────────────────────────────────────────────────
 
 const USER_TOC = [
-  { id: 'ug-what',     label: 'What is Surface?' },
-  { id: 'ug-start',    label: 'Getting Started' },
-  { id: 'ug-session',  label: 'Creating a Session' },
-  { id: 'ug-run',      label: 'Running an Analysis' },
-  { id: 'ug-results',  label: 'Reading Results' },
-  { id: 'ug-agents',   label: 'Managing Agents' },
-  { id: 'ug-export',   label: 'Exporting Reports' },
+  { id: 'ug-what',      label: 'What is Surface?' },
+  { id: 'ug-start',     label: 'Getting Started' },
+  { id: 'ug-dashboard', label: 'Dashboard' },
+  { id: 'ug-session',   label: 'Creating a Session' },
+  { id: 'ug-run',       label: 'Running an Analysis' },
+  { id: 'ug-results',   label: 'Reading Results' },
+  { id: 'ug-agents',    label: 'Managing Agents' },
+  { id: 'ug-export',    label: 'Exporting Reports' },
 ];
 
 const TECH_TOC = [
@@ -181,6 +182,75 @@ function UserGuide() {
           </div>
         </Section>
 
+        <Section id="ug-dashboard" title="Dashboard" icon={BarChart2}>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            The Dashboard gives you a live overview of your risk posture across all sessions. The top of the page
+            shows three hero cards, followed by a running sessions strip and the full session list.
+          </p>
+
+          <SubSection title="Posture card (left hero)">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              The orange-to-red gradient card shows your <strong>average SCRS</strong> across all completed
+              sessions in the last 30 days. A delta pill (▲/▼) compares it to the previous 30-day period.
+              Below the score, a segmented bar breaks sessions into four posture bands:
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+              {[
+                { label: 'LOW',      range: '0–39',   color: '#16a34a' },
+                { label: 'MEDIUM',   range: '40–59',  color: '#ca8a04' },
+                { label: 'HIGH',     range: '60–79',  color: '#ea580c' },
+                { label: 'CRITICAL', range: '80–100', color: '#dc2626' },
+              ].map(({ label, range, color }) => (
+                <Card key={label} className="p-3 flex flex-col gap-1">
+                  <span className="text-xs font-semibold" style={{ color }}>{label}</span>
+                  <span className="text-xs text-muted-foreground font-mono">{range}</span>
+                </Card>
+              ))}
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Each segment in the bar is proportional to the count of sessions in that band. Hover a segment
+              to see the count. Sessions without an SCRS score (e.g. draft or legacy sessions) are excluded.
+            </p>
+          </SubSection>
+
+          <SubSection title="SCRS trend chart (centre hero)">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              An area chart plots each completed session's SCRS score over time, with an orange gradient fill and
+              a red dashed threshold line at SCRS 80 (the CRITICAL boundary). The most recent session is
+              highlighted. A header shows the 30-day average and delta. If fewer than two completed sessions
+              have an SCRS score, a placeholder is shown instead.
+            </p>
+          </SubSection>
+
+          <SubSection title="Sessions-by-posture donut + roster (right hero)">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              An SVG donut chart shows the proportion of sessions in each posture band.
+              Below it, a count of open mitigations is shown. The right panel also displays a
+              <strong> roster snapshot</strong>: total active agents, a red/blue team split bar,
+              and the top agent domains in your roster.
+            </p>
+          </SubSection>
+
+          <SubSection title="Running sessions strip">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Sessions currently running are pinned above the list in an amber card with a
+              gradient progress bar (emerald → amber). The strip auto-refreshes every 5 seconds
+              while any session is running. A roster snapshot panel sits alongside the running card,
+              showing which agents are involved.
+            </p>
+          </SubSection>
+
+          <SubSection title="Session list rows">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Each completed session row shows the session title, scenario excerpt, date, and —
+              when available — the SCRS score with a colour-coded posture band pill (e.g.{' '}
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ background: '#ea580c18', color: '#ea580c' }}>HIGH</span>).
+              Sessions are grouped by lineage (parent → child re-runs) when <strong>Group by lineage</strong> is enabled.
+            </p>
+          </SubSection>
+        </Section>
+
         <Section id="ug-session" title="Creating a Session" icon={Plus}>
           <SubSection title="Required fields">
             <div className="text-sm text-muted-foreground space-y-1">
@@ -242,6 +312,29 @@ function UserGuide() {
         </Section>
 
         <Section id="ug-results" title="Reading Results" icon={BarChart2}>
+          <SubSection title="Session header">
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p>
+                Above the tabs, the session header shows the title, status badge, and scenario text.
+                For completed V2 sessions, two additional elements appear:
+              </p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>
+                  <strong>Severity distribution bar</strong> — a thin coloured bar below the scenario text
+                  showing the breakdown of agent findings by severity (CRITICAL / HIGH / MEDIUM / LOW).
+                  A legend beneath it shows counts per band. Severity shift counts
+                  (how many agents revised their rating up or down in R2) are shown alongside.
+                </li>
+                <li>
+                  <strong>SCRS hero card</strong> — a circular gauge showing the SCRS score with the
+                  posture band colour, plus a breakdown of compound chains found and severity shifts.
+                  When the session is a re-run of a parent session, a <strong>Score over re-runs</strong> mini
+                  bar chart appears inside the card, comparing the parent SCRS to the current session's SCRS.
+                </li>
+              </ul>
+            </div>
+          </SubSection>
+
           <SubSection title="Debate tab">
             <p className="text-sm text-muted-foreground leading-relaxed">
               Shows all agent assessments split into two cards — <strong>Round 1</strong> (independent views)
@@ -250,6 +343,7 @@ function UserGuide() {
               revised their rating between rounds.
             </p>
           </SubSection>
+
           <SubSection title="Report tab">
             <div className="text-sm text-muted-foreground space-y-1.5">
               <p>The synthesis report has six named sections:</p>
@@ -261,20 +355,48 @@ function UserGuide() {
                 <li><strong>Priority Mitigations</strong> — immediate/short-term/long-term recommended actions</li>
                 <li><strong>Sharpest Insights</strong> — the most surprising or important statements, attributed to agents</li>
               </ul>
-              <p className="pt-1">Below the sections, the <strong>SCRS gauge</strong> shows the Systemic Critical Risk Score (0–100) with a colour-coded posture label.</p>
+              <p className="pt-1">
+                When this session is a re-run, a <strong>vs parent</strong> comparison panel appears
+                on the right showing SCRS delta, chain count change, and whether mitigations were generated.
+              </p>
             </div>
           </SubSection>
+
           <SubSection title="Risks tab">
             <p className="text-sm text-muted-foreground leading-relaxed">
               Priority mitigations from synthesis, displayed as an action list.
             </p>
           </SubSection>
+
           <SubSection title="Chains tab">
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Attack chains visualised as step-by-step diagrams. Each chain shows the sequence from
-              initial access through to impact, with step labels and descriptions.
-            </p>
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p>
+                Compound threat chains are shown as step-by-step cards. Each chain lists its steps
+                with step number circles connected by a vertical line.
+              </p>
+              <p>
+                Click <strong>Generate Chain Break Analysis</strong> to run an additional LLM pass
+                that annotates each chain with:
+              </p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>A <strong>resilience rating</strong> (HIGH / MEDIUM / LOW) and rationale for the whole chain</li>
+                <li>A <strong>leverage rating</strong> per step — how critical breaking the chain at that point would be</li>
+                <li>A specific <strong>mitigation</strong> for each step: title, description, owner, and timeline</li>
+              </ul>
+              <p>
+                Once loaded, the tab becomes a <strong>live SCRS simulator</strong>. Toggle
+                <strong> Apply</strong> on any mitigation to see the projected SCRS drop shown in the
+                score bar at the top. Toggle multiple mitigations to compound the reduction
+                (capped at −20 points from countermeasures). Un-toggle to revert.
+                This state is ephemeral — it resets on page refresh.
+              </p>
+            </div>
+            <Callout variant="info">
+              Chain Break Analysis is generated on demand and stored in the session's CDN payload.
+              It persists across page refreshes. Re-running the session resets it.
+            </Callout>
           </SubSection>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {[
               { label: 'CRITICAL', desc: 'SCRS 80–100 — Immediate action required', sev: 'CRITICAL' },
@@ -375,8 +497,11 @@ function TechOverview() {
                   <PropRow name="src/lib/agentData.js"                 type="library"   desc="All prompt builders: buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, extractSynthesisSections." />
                   <PropRow name="src/lib/scrsEngine.js"                type="library"   desc="SCRS computation: computeSCRS, SCRS_BANDS, getPosture." />
                   <PropRow name="src/lib/asyncPool.js"                 type="utility"   desc="Bounded-concurrency async iterator for parallel LLM calls." />
-                  <PropRow name="src/components/session/DebateRound.jsx"   type="component" desc="DebateRoundV2 for per-agent R1/R2 display." />
+                  <PropRow name="src/components/session/DebateRound.jsx"     type="component" desc="DebateRoundV2 for per-agent R1/R2 display." />
                   <PropRow name="src/components/session/SynthesisReport.jsx" type="component" desc="Six-section synthesis display + SCRS gauge." />
+                  <PropRow name="src/components/session/ChainBreaker.jsx"    type="component" desc="Chain Break Analysis: per-step mitigations, resilience ratings, live SCRS simulator." />
+                  <PropRow name="src/components/dashboard/StatsCards.jsx"    type="component" desc="Dashboard hero: gradient posture card, SVG area trend chart, sessions donut + roster." />
+                  <PropRow name="src/components/dashboard/SessionsList.jsx"  type="component" desc="Session list with lineage grouping, running-session strip, band pills." />
                 </tbody>
               </table>
             </div>
@@ -457,13 +582,17 @@ function TechOverview() {
               <p className="pl-4">"agent_results": [{'{'} agent_id, agent_name, team, discipline,</p>
               <p className="pl-8">round1_assessment, round1_severity,</p>
               <p className="pl-8">round2_rebuttal, round2_revised_severity, status {'}'}],</p>
+              <p className="pl-4">"compound_chains": [{'{'} name, steps: [{'{'} step_number, step_text {'}'}] {'}'}],</p>
               <p className="pl-4">"consensus_findings": "string",</p>
               <p className="pl-4">"contested_findings": "string",</p>
               <p className="pl-4">"blind_spots": "string",</p>
               <p className="pl-4">"priority_mitigations": "string",</p>
               <p className="pl-4">"sharpest_insights": "string",</p>
               <p className="pl-4">"scrs_score": 0–100,</p>
-              <p className="pl-4">"scrs_breakdown": {'{'} baseScore, resilienceModifier, countermeasureModifier, coveragePct, ... {'}'}</p>
+              <p className="pl-4">"scrs_breakdown": {'{'} baseScore, resilienceModifier, countermeasureModifier, coveragePct, ... {'}'},</p>
+              <p className="pl-4">"chain_analyses": [{'{'} chain_name, chain_resilience, resilience_rationale,</p>
+              <p className="pl-8">steps: [{'{'} step_number, leverage, mitigation_title, mitigation_description,</p>
+              <p className="pl-12">mitigation_owner, mitigation_timeline {'}'}] {'}'}]  <span className="text-muted-foreground/50">// added by Chain Break Analysis</span></p>
               <p>{'}'}</p>
             </Card>
           </SubSection>
@@ -623,6 +752,7 @@ function TechOverview() {
                 <PropRow name="parseSeverityFromText(text)" type="fn" desc='Extracts "SEVERITY: X" from last line. Returns {assessment, severity}. Falls back to last-3-lines scan then "HIGH".' />
                 <PropRow name="extractSynthesisSections(rawText)" type="fn" desc="Splits on ## headings, returns 6-key object. Compound chains parsed into [{name, steps:[{step_number, step_text}]}]." />
                 <PropRow name="formatOthersAssessments(agentRows, excludeId)" type="fn" desc="Formats peer R1s for R2 prompt. Excludes the calling agent. Skips agents with no R1 text." />
+                <PropRow name="buildChainBreakPrompt(chains, scenarioContext)" type="fn" desc="Returns prompt + response_json_schema for the Chain Break Analysis LLM call. Produces per-chain resilience ratings and per-step mitigations with leverage, owner, and timeline." />
               </tbody>
             </table>
           </div>
