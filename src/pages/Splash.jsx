@@ -5,12 +5,12 @@ import { Button } from '@/components/ui/button';
 import heroImage from '@/assets/surface-hero.jpg';
 
 const FEATURES = [
-  { label: 'Red vs Blue',      desc: 'Adversarial agent debate surfaces hidden risks from both sides' },
-  { label: 'Multi-domain',     desc: 'Cyber, geopolitical, financial, operational, strategic analysis' },
-  { label: 'Risk Registry',    desc: 'Structured output: likelihood × impact scoring with mitigations' },
-  { label: 'Attack Chains',    desc: 'Step-by-step effect chains from initial access to impact' },
-  { label: 'Playbook Ready',   desc: 'Immediate, short-term, and long-term action plans' },
-  { label: 'Export to PDF',    desc: 'Full decision-grade report with all 8 sections formatted' },
+  { label: 'Red vs Blue',       desc: 'Adversarial agent debate surfaces hidden risks from both sides' },
+  { label: 'Multi-domain',      desc: 'Cyber, geopolitical, financial, operational, strategic analysis' },
+  { label: 'Synthesis Report',  desc: 'Consensus findings, contested points, blind spots, compound chains and priority mitigations' },
+  { label: 'Attack Chains',     desc: 'Step-by-step compound threat chains from initial access to impact' },
+  { label: 'SCRS Score',        desc: 'Systemic Critical Risk Score: 0–100 composite weighted by agent expertise and chain resilience' },
+  { label: 'Export to PDF',     desc: 'Decision-grade PDF with per-agent assessments, synthesis sections and SCRS score' },
 ];
 
 export default function Splash() {

@@ -95,7 +95,7 @@ const USER_TOC = [
 
 const TECH_TOC = [
   { id: 'tc-arch',     label: 'Architecture' },
-  { id: 'tc-v2',       label: 'V2 Debate Format' },
+  { id: 'tc-v2',       label: 'Debate Format' },
   { id: 'tc-scrs',     label: 'SCRS Scoring' },
   { id: 'tc-models',   label: 'Data Models' },
   { id: 'tc-agents',   label: 'Agent Configuration' },
@@ -217,7 +217,7 @@ function UserGuide() {
         <Section id="ug-run" title="Running an Analysis" icon={Target}>
           <p className="text-sm text-muted-foreground leading-relaxed">
             Click <strong>Run Analysis</strong> on the session detail page. Surface automatically runs
-            the full V2 debate pipeline — no interaction needed while it runs.
+            the full debate pipeline — no interaction needed while it runs.
           </p>
           <SubSection title="Live progress indicators">
             <div className="text-sm text-muted-foreground space-y-2">
@@ -266,8 +266,7 @@ function UserGuide() {
           </SubSection>
           <SubSection title="Risks tab">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              For V1 sessions: a risk registry table with likelihood × impact scoring and a 5×5 heatmap.
-              For V2 sessions: the priority mitigations from synthesis, displayed as an action list.
+              Priority mitigations from synthesis, displayed as an action list.
             </p>
           </SubSection>
           <SubSection title="Chains tab">
@@ -319,17 +318,7 @@ function UserGuide() {
             Click <strong>Export PDF</strong> on any completed session. The PDF is generated client-side
             and downloads immediately — no server round-trip.
           </p>
-          <SubSection title="V1 PDF includes">
-            <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5 ml-2">
-              <li>Cover page with session title and date</li>
-              <li>Session metadata (mode, agents, scenario)</li>
-              <li>Risk registry table with likelihood × impact scoring</li>
-              <li>Attack chains</li>
-              <li>Full debate transcript (red/blue per round)</li>
-              <li>Mitigation playbook (if generated)</li>
-            </ul>
-          </SubSection>
-          <SubSection title="V2 PDF includes">
+          <SubSection title="PDF includes">
             <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5 ml-2">
               <li>Cover page</li>
               <li>Scenario summary</li>
@@ -386,7 +375,7 @@ function TechOverview() {
                   <PropRow name="src/lib/agentData.js"                 type="library"   desc="All prompt builders: buildR1Prompt, buildR2Prompt, buildSynthesisPrompt, parseSeverityFromText, extractSynthesisSections." />
                   <PropRow name="src/lib/scrsEngine.js"                type="library"   desc="SCRS computation: computeSCRS, SCRS_BANDS, getPosture." />
                   <PropRow name="src/lib/asyncPool.js"                 type="utility"   desc="Bounded-concurrency async iterator for parallel LLM calls." />
-                  <PropRow name="src/components/session/DebateRound.jsx"   type="component" desc="DebateRound (V1) + DebateRoundV2 exports for per-agent display." />
+                  <PropRow name="src/components/session/DebateRound.jsx"   type="component" desc="DebateRoundV2 for per-agent R1/R2 display." />
                   <PropRow name="src/components/session/SynthesisReport.jsx" type="component" desc="Six-section synthesis display + SCRS gauge." />
                 </tbody>
               </table>
@@ -394,10 +383,10 @@ function TechOverview() {
           </SubSection>
         </Section>
 
-        <Section id="tc-v2" title="V2 Debate Format" icon={GitBranch}>
+        <Section id="tc-v2" title="Debate Format" icon={GitBranch}>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            The V2 format replaces the sequential Red→Blue per-round loop with a structured
-            three-phase pipeline that produces richer, more adversarial outputs.
+            Surface runs a structured three-phase pipeline that produces richer, more adversarial
+            outputs than a sequential round-robin approach.
           </p>
           <div className="space-y-3">
             {[
@@ -430,7 +419,7 @@ function TechOverview() {
                   'Six ## headings instruct structured output: CONSENSUS FINDINGS, CONTESTED FINDINGS, COMPOUND CHAINS, BLIND SPOTS, PRIORITY MITIGATIONS, SHARPEST INSIGHTS',
                   'extractSynthesisSections() splits on ## headings; COMPOUND CHAINS parsed into [{name, steps}]',
                   'computeSCRS() calculates composite risk score from severity weights × expertise multipliers',
-                  'Full JSON payload uploaded via UploadFile; URL stored in executive_summary as "v2url:<url>"',
+                  'Full JSON payload uploaded via UploadFile; URL stored in executive_summary as "v2url:<cdn_url>"',
                 ],
               },
             ].map(({ phase, color, items }) => (
@@ -449,14 +438,14 @@ function TechOverview() {
           </div>
           <SubSection title="Storage strategy">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              All V2 data is stored in existing Session fields to avoid schema deployment dependencies:
+              All debate data is stored in existing Session fields to avoid schema deployment dependencies:
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <tbody>
                   <PropRow name="executive_summary" type="string" desc='"v2url:<cdn_url>" — URL to the uploaded JSON blob containing agent_results + all synthesis sections.' />
-                  <PropRow name="attack_chains"     type="array"  desc="Compound chains from synthesis in V1-compatible format ({id, name, steps:[{label, description}]})." />
-                  <PropRow name="status"            type="enum"   desc="running → completed (or failed). debate_format=v2 written but may not be returned by backend." />
+                  <PropRow name="attack_chains"     type="array"  desc="Compound chains from synthesis ({id, name, steps:[{label, description}]})." />
+                  <PropRow name="status"            type="enum"   desc="running → completed (or failed)." />
                 </tbody>
               </table>
             </div>
@@ -550,11 +539,8 @@ function TechOverview() {
                 ['status', 'enum', 'draft | running | completed | failed'],
                 ['mode', 'enum', 'standard | deep | rapid'],
                 ['selected_agents', 'string[]', 'Agent IDs included in this session'],
-                ['executive_summary', 'string', 'V2: "v2url:<cdn>" pointing to uploaded JSON. V1: plain text.'],
-                ['attack_chains', 'array', 'Compound threat chains in V1-compatible step format'],
-                ['rounds', 'array', 'V1 debate rounds with red_responses / blue_responses per round'],
-                ['risk_registry', 'array', 'V1: [{id, title, category, likelihood, impact, mitigation, owner, status}]'],
-                ['mitigation_playbook', 'object', 'V1: {overview, actions:[{priority, title, description, steps[]}]}'],
+                ['executive_summary', 'string', '"v2url:<cdn>" pointing to the uploaded JSON blob with agent results and synthesis sections.'],
+                ['attack_chains', 'array', 'Compound threat chains from synthesis ({id, name, steps:[{label, description}]}).'],
               ],
             },
             {
