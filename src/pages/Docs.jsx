@@ -5,8 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
   BookOpen, Cpu, Shield, Swords, Users, BarChart2, FileDown,
-  ChevronRight, AlertTriangle, CheckCircle2, Zap, Link2, RefreshCw,
-  GitBranch, Brain, Target
+  ChevronRight, CheckCircle2, Zap, GitBranch, Brain, Target, Plus
 } from 'lucide-react';
 
 // ── Shared primitives ──────────────────────────────────────────────────────────
