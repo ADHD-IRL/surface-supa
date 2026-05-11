@@ -96,6 +96,7 @@ Write a Round 1 independent assessment (350-500 words) covering:
 3. Second threat — same structure
 4. Invalidating assumption — one assumption that if wrong changes your whole assessment
 5. Key finding — one-sentence bottom line
+6. Confidence and key unknown — rate your confidence in this assessment (High / Medium / Low) and name the single piece of information that, if you had it, would most change your position
 
 Write in first person as the expert. Be specific and opinionated. Do not hedge.
 
@@ -112,8 +113,9 @@ ${othersAssessments}
 
 Write your Round 2 rebuttal (250-400 words) covering:
 1. Strongest alliance — which agent's findings amplify yours most, and the compound threat chain that emerges (name them explicitly)
-2. Strongest disagreement — which agent you most disagree with and exactly why (name them, cite their argument)
-3. Whether you've revised your severity rating and why
+2. Strongest disagreement — first, state the best version of their argument in one sentence (steelman it), then explain precisely why you still disagree (name them, cite their argument)
+3. Key unknown — name one critical unknown that, if resolved differently, would change your severity rating
+4. Whether you've revised your severity rating and why
 
 Be direct. Name names. Change your position if persuaded.
 
@@ -164,6 +166,12 @@ Numbered list of recommended immediate actions based on highest-severity consens
 ## SHARPEST INSIGHTS
 The 5 most important or surprising specific statements from individual agents. Format each as: "Agent Name — [the insight]"
 
+## KEY UNCERTAINTIES
+The 3–5 most critical unknowns or assumptions in this scenario. For each: state the uncertainty clearly, note which agents flagged it (if any), and describe how the risk picture would shift if it resolved differently.
+
+## ESCALATION INDICATORS
+Specific observable signals or trigger events that would cause this risk assessment to move up a severity band. Format as a bulleted list. Be concrete — not "if the situation worsens" but "if X is observed / if Y occurs".
+
 Write analytically. Be specific. Cite agents by name throughout.`;
 }
 
@@ -205,12 +213,14 @@ export function extractSynthesisSections(rawText) {
   const parts = rawText.split(/^##\s+/m);
 
   const sectionNames = {
-    'CONSENSUS FINDINGS': 'consensus_findings',
-    'CONTESTED FINDINGS': 'contested_findings',
-    'COMPOUND CHAINS': 'compound_chains',
-    'BLIND SPOTS': 'blind_spots',
-    'PRIORITY MITIGATIONS': 'priority_mitigations',
-    'SHARPEST INSIGHTS': 'sharpest_insights',
+    'CONSENSUS FINDINGS':    'consensus_findings',
+    'CONTESTED FINDINGS':    'contested_findings',
+    'COMPOUND CHAINS':       'compound_chains',
+    'BLIND SPOTS':           'blind_spots',
+    'PRIORITY MITIGATIONS':  'priority_mitigations',
+    'SHARPEST INSIGHTS':     'sharpest_insights',
+    'KEY UNCERTAINTIES':     'key_uncertainties',
+    'ESCALATION INDICATORS': 'escalation_indicators',
   };
 
   for (const part of parts) {

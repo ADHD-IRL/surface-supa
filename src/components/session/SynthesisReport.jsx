@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
-import { AlertTriangle, CheckCircle2, GitBranch, Eye, Shield, Zap, ChevronRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, GitBranch, Eye, Shield, Zap, ChevronRight, HelpCircle, TrendingUp } from 'lucide-react';
 import { SCRS_BANDS, getPosture } from '@/lib/scrsEngine';
 
 function SectionCard({ title, icon: Icon, iconColor, children, className }) {
@@ -200,6 +200,20 @@ export default function SynthesisReport({ synthesis, sessionAgents = [], agents 
       <SectionCard title="Sharpest Insights" icon={AlertTriangle} iconColor="text-primary">
         <MarkdownSection text={synthesis.sharpest_insights} />
       </SectionCard>
+
+      {synthesis.key_uncertainties && (
+        <SectionCard title="Key Uncertainties" icon={HelpCircle} iconColor="text-amber-500">
+          <MarkdownSection text={synthesis.key_uncertainties} />
+        </SectionCard>
+      )}
+
+      {synthesis.escalation_indicators && (
+        <SectionCard title="Escalation Indicators" icon={TrendingUp} iconColor="text-red-team">
+          <div className="border-l-4 border-red-team/30 pl-4">
+            <MarkdownSection text={synthesis.escalation_indicators} />
+          </div>
+        </SectionCard>
+      )}
 
       <ScrsGauge scrs={synthesis.scrs_score} breakdown={synthesis.scrs_breakdown} />
     </div>

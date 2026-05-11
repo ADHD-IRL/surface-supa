@@ -315,8 +315,10 @@ export default function SessionDetail() {
         consensus_findings: sections.consensus_findings || '',
         contested_findings: sections.contested_findings || '',
         blind_spots: sections.blind_spots || '',
-        priority_mitigations: sections.priority_mitigations || '',
-        sharpest_insights: sections.sharpest_insights || '',
+        priority_mitigations:  sections.priority_mitigations  || '',
+        sharpest_insights:     sections.sharpest_insights     || '',
+        key_uncertainties:     sections.key_uncertainties     || '',
+        escalation_indicators: sections.escalation_indicators || '',
         scrs_score: scrs,
         scrs_breakdown: breakdown,
       });
@@ -800,7 +802,9 @@ export default function SessionDetail() {
       if (synth.contested_findings) { sectionHeader('Contested Findings'); bodyText(synth.contested_findings); y += 2; }
       if (synth.blind_spots) { sectionHeader('Blind Spots'); bodyText(synth.blind_spots); y += 2; }
       if (synth.priority_mitigations) { sectionHeader('Priority Mitigations'); bodyText(synth.priority_mitigations); y += 2; }
-      if (synth.sharpest_insights) { sectionHeader('Sharpest Insights'); bodyText(synth.sharpest_insights); y += 2; }
+      if (synth.sharpest_insights)     { sectionHeader('Sharpest Insights');     bodyText(synth.sharpest_insights);     y += 2; }
+      if (synth.key_uncertainties)     { sectionHeader('Key Uncertainties');     bodyText(synth.key_uncertainties);     y += 2; }
+      if (synth.escalation_indicators) { sectionHeader('Escalation Indicators'); bodyText(synth.escalation_indicators); y += 2; }
 
       // Compound chains as step diagrams
       if (synth.compound_chains?.length > 0) {

@@ -166,7 +166,7 @@ export default function DebateRoster({ session, agents, sessionAgents }) {
         </div>
 
         {/* ── Excluded ── */}
-        {excluded.length > 0 && (
+        {excluded.length > 0 && !isRunning && (
           <div className="border-t border-border pt-2 mt-1">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
               Not in session
