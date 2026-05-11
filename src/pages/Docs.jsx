@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
   BookOpen, Cpu, Shield, Swords, Users, BarChart2, FileDown,
-  ChevronRight, CheckCircle2, Zap, GitBranch, Brain, Target, Plus
+  ChevronRight, CheckCircle2, Zap, GitBranch, Brain, Target, Plus, Calculator
 } from 'lucide-react';
 
 // ── Shared primitives ──────────────────────────────────────────────────────────
@@ -90,6 +90,7 @@ const USER_TOC = [
   { id: 'ug-session',   label: 'Creating a Session' },
   { id: 'ug-run',       label: 'Running an Analysis' },
   { id: 'ug-results',   label: 'Reading Results' },
+  { id: 'ug-scores',    label: 'How Scores Work' },
   { id: 'ug-agents',    label: 'Managing Agents' },
   { id: 'ug-export',    label: 'Exporting Reports' },
 ];
@@ -410,6 +411,246 @@ function UserGuide() {
               </div>
             ))}
           </div>
+        </Section>
+
+        <Section id="ug-scores" title="How Scores Work" icon={Calculator}>
+
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Surface produces three related numbers: the <strong>SCRS</strong> (your current risk score),
+            the <strong>Mitigation Score</strong> (how much applying countermeasures reduces that risk),
+            and the <strong>Projected Score</strong> (what the SCRS would be if you applied selected mitigations).
+            All three are calculated by the same engine — they just use different inputs.
+          </p>
+
+          {/* ── SCRS ── */}
+          <SubSection title="1 · The SCRS — your overall risk score">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              SCRS stands for <strong>Systemic Critical Risk Score</strong>. It is a single number from
+              0 to 100 representing how severe the assessed risk is across the whole session.
+              It is built from three components that are added together:
+            </p>
+            <div className="space-y-3 mt-3">
+
+              <Card className="p-4 border-l-4 border-l-blue-500/60 space-y-2">
+                <p className="text-sm font-semibold text-foreground">Component 1 — Base Score (the agents' verdict)</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Each agent produces a severity rating at the end of their debate: CRITICAL, HIGH, MEDIUM, or LOW.
+                  Surface converts those ratings to numbers — CRITICAL = 4, HIGH = 3, MEDIUM = 2, LOW = 1 —
+                  then multiplies each agent's number by a weight based on their expertise level
+                  (World-Class agents count more than Junior agents).
+                  The sum of all those weighted numbers is divided by the maximum possible sum,
+                  giving a percentage. That percentage, scaled to 100, is the Base Score.
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <span className="font-medium text-foreground">In plain terms:</span> if most agents say CRITICAL
+                  and they are senior experts, the Base Score will be close to 100. If most say LOW and they are
+                  junior, it will be close to 0. Agents who do not produce a final severity rating are excluded.
+                </p>
+                <div className="rounded-md bg-muted/40 px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                  Base Score = (Σ severity_weight × expertise_multiplier) ÷ (agent_count × 4) × 100
+                </div>
+              </Card>
+
+              <Card className="p-4 border-l-4 border-l-amber-500/60 space-y-2">
+                <p className="text-sm font-semibold text-foreground">Component 2 — Resilience Modifier (how hard the threat chains are to break)</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  After synthesis, Surface identifies compound threat chains — multi-step sequences
+                  where one event enables the next. The Chain Break Analysis labels each chain with a
+                  resilience rating: HIGH, MEDIUM, or LOW.
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <span className="font-medium text-foreground">HIGH resilience</span> means the chain is hard
+                  to disrupt — the risk persists, so it adds <strong>0 points</strong> (no relief).{' '}
+                  <span className="font-medium text-foreground">MEDIUM resilience</span> means partial disruption
+                  is possible: <strong>−5 points</strong>.{' '}
+                  <span className="font-medium text-foreground">LOW resilience</span> means the chain is brittle
+                  and easily broken: <strong>−10 points</strong>.
+                  The total reduction from all chains is capped at <strong>−25 points</strong>.
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <span className="font-medium text-foreground">In plain terms:</span> if your threat chains are
+                  all rated LOW resilience (easy to break), the Resilience Modifier can reduce the score by up to
+                  25 points before you have done anything. If they are HIGH resilience, this modifier does nothing.
+                </p>
+                <div className="rounded-md bg-muted/40 px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                  Resilience Modifier = Σ per-chain modifier, capped at −25
+                  <br />HIGH → 0 pts &nbsp;|&nbsp; MEDIUM → −5 pts &nbsp;|&nbsp; LOW → −10 pts
+                </div>
+              </Card>
+
+              <Card className="p-4 border-l-4 border-l-green-500/60 space-y-2">
+                <p className="text-sm font-semibold text-foreground">Component 3 — Countermeasure Modifier (mitigations you have applied)</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  This component only changes when you toggle mitigations on in the Chains tab simulator.
+                  By default it is 0. Once you apply mitigations, it reduces the score by up to{' '}
+                  <strong>−20 points</strong>.
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Only steps labelled <strong>HIGH leverage</strong> contribute. The modifier is calculated
+                  by looking at what fraction of all HIGH-leverage steps across all chains you have covered:
+                </p>
+                <div className="rounded-md bg-muted/40 px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                  coverage = HIGH-leverage steps applied ÷ total HIGH-leverage steps
+                  <br />Countermeasure Modifier = −(coverage × 20)
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <span className="font-medium text-foreground">Example:</span> your session has 10 HIGH-leverage
+                  steps. Each one is worth 20 ÷ 10 = <strong>2 points</strong> of reduction. Apply 5 of them →
+                  50% coverage → −10 points. Apply all 10 → −20 points (the maximum).
+                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  If your session has only 4 HIGH-leverage steps, each is worth 5 points. If it has 20,
+                  each is worth 1 point. The pool is always 20 — the per-step value just depends on how
+                  many steps exist.
+                </p>
+              </Card>
+
+            </div>
+
+            <div className="rounded-lg bg-muted/30 border border-border px-5 py-4 mt-2 space-y-1">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Final formula</p>
+              <p className="font-mono text-sm text-foreground">SCRS = Base Score + Resilience Modifier + Countermeasure Modifier</p>
+              <p className="text-xs text-muted-foreground mt-1">Clamped to 0–100. Rounded to the nearest whole number.</p>
+            </div>
+
+            <Callout variant="info">
+              The Resilience Modifier and Countermeasure Modifier are only available after you run
+              <strong> Generate Chain Break Analysis</strong> on the Chains tab. Before that, both
+              are 0 and the SCRS reflects only the Base Score.
+            </Callout>
+          </SubSection>
+
+          {/* ── Mitigation Score ── */}
+          <SubSection title="2 · The Mitigation Score — how much each action is worth">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              The mitigation score is the reduction in SCRS you get from applying a specific countermeasure.
+              It is shown as a "<strong>−N pts if applied</strong>" chip next to each HIGH-leverage step in the
+              Chains tab.
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+              It is calculated by running the full SCRS formula twice — once without the mitigation and
+              once with it — and taking the difference:
+            </p>
+            <div className="rounded-md bg-muted/40 px-4 py-2.5 font-mono text-xs text-muted-foreground">
+              Mitigation Score = SCRS(no mitigations) − SCRS(this mitigation applied)
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+              Because the 20-point pool is divided equally across all HIGH-leverage steps, the value per step is:
+            </p>
+            <div className="rounded-md bg-muted/40 px-4 py-2.5 font-mono text-xs text-muted-foreground">
+              Value per HIGH step = 20 ÷ total HIGH-leverage steps in the session
+            </div>
+            <div className="space-y-1.5 mt-3">
+              {[
+                ['4 HIGH steps total',  '20 ÷ 4 = 5 pts each'],
+                ['10 HIGH steps total', '20 ÷ 10 = 2 pts each'],
+                ['20 HIGH steps total', '20 ÷ 20 = 1 pt each'],
+              ].map(([scenario, result]) => (
+                <div key={scenario} className="flex items-center gap-3 text-sm">
+                  <span className="text-muted-foreground w-48">{scenario}</span>
+                  <span className="font-mono text-foreground">{result}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-3">
+              MEDIUM and LOW leverage steps are not included in this calculation — they do not
+              affect the Countermeasure Modifier. They still represent meaningful mitigations;
+              they just do not move the SCRS needle.
+            </p>
+          </SubSection>
+
+          {/* ── Projected Score ── */}
+          <SubSection title="3 · The Projected Score — what the score would be">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              The Projected Score is shown at the top of the Chains tab once at least one mitigation
+              is applied. It answers: <em>"if I actually implemented these controls, what would my SCRS become?"</em>
+            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+              It is the same SCRS formula, but with the applied mitigations fed in as the Countermeasure Modifier:
+            </p>
+            <div className="rounded-md bg-muted/40 px-4 py-2.5 font-mono text-xs text-muted-foreground">
+              Projected SCRS = Base Score + Resilience Modifier + Countermeasure Modifier(applied steps)
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-3">
+              The score bar at the top of the Chains tab shows both numbers side by side with a "→" between
+              them so you can see the before and after at a glance. Untoggling a mitigation immediately
+              recalculates the projected score.
+            </p>
+            <Callout variant="warn">
+              The projected score is <strong>ephemeral</strong> — it resets when you leave the page.
+              It is a "what-if" simulator, not a persistent record. The actual SCRS stored against the
+              session only updates when you re-run the analysis.
+            </Callout>
+          </SubSection>
+
+          {/* ── Worked example ── */}
+          <SubSection title="Worked example">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Six agents ran a session. Their final severities and expertise levels produce a Base Score of <strong>72</strong>.
+              Chain Break Analysis found two compound chains, both rated MEDIUM resilience (−5 pts each → −10 total).
+              No mitigations have been applied yet.
+            </p>
+            <div className="rounded-lg border border-border overflow-hidden mt-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/50 border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-semibold text-foreground text-xs uppercase tracking-wide">Component</th>
+                    <th className="text-right px-4 py-2.5 font-semibold text-foreground text-xs uppercase tracking-wide">Value</th>
+                    <th className="text-left px-4 py-2.5 font-semibold text-foreground text-xs uppercase tracking-wide">Why</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {[
+                    ['Base Score',               '+72', 'Agents\' weighted severity average'],
+                    ['Resilience Modifier',       '−10', '2 chains × MEDIUM resilience (−5 each)'],
+                    ['Countermeasure Modifier',    ' 0', 'No mitigations applied yet'],
+                    ['SCRS',                      '62',  'HIGH posture — prioritise controls'],
+                  ].map(([label, val, why], i) => (
+                    <tr key={label} className={i === 3 ? 'bg-amber-500/5 font-semibold' : ''}>
+                      <td className="px-4 py-2.5 text-foreground">{label}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-foreground">{val}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground text-xs">{why}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-4">
+              The session has <strong>8 HIGH-leverage steps</strong> across both chains.
+              Each is worth 20 ÷ 8 = <strong>2.5 points</strong>.
+              The analyst applies 4 of the 8 mitigations (50% coverage):
+            </p>
+            <div className="rounded-lg border border-border overflow-hidden mt-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/50 border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-semibold text-foreground text-xs uppercase tracking-wide">Component</th>
+                    <th className="text-right px-4 py-2.5 font-semibold text-foreground text-xs uppercase tracking-wide">Value</th>
+                    <th className="text-left px-4 py-2.5 font-semibold text-foreground text-xs uppercase tracking-wide">Why</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {[
+                    ['Base Score',              '+72', 'Unchanged'],
+                    ['Resilience Modifier',     '−10', 'Unchanged'],
+                    ['Countermeasure Modifier', '−10', '4 of 8 HIGH steps applied → 50% coverage → −(0.5 × 20)'],
+                    ['Projected SCRS',           '52', 'MEDIUM posture — one band lower than before'],
+                  ].map(([label, val, why], i) => (
+                    <tr key={label} className={i === 3 ? 'bg-green-500/5 font-semibold' : ''}>
+                      <td className="px-4 py-2.5 text-foreground">{label}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-foreground">{val}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground text-xs">{why}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed mt-3">
+              Applying those 4 mitigations dropped the score from 62 (HIGH) to 52 (MEDIUM) — a
+              meaningful posture change from just half the available countermeasures.
+            </p>
+          </SubSection>
+
         </Section>
 
         <Section id="ug-agents" title="Managing Agents" icon={Users}>
