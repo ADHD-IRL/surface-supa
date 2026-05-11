@@ -157,7 +157,7 @@ export default function SessionDetail() {
     return { leverage: (chainBreakData?.[ci]?.steps?.[si]?.leverage || 'MEDIUM').toUpperCase() };
   });
 
-  const projectedResult = chainBreakData
+  const projectedResult = chainBreakData && appliedSteps.size > 0
     ? computeSCRS({ ...scrsBaseParams, appliedCMs: appliedCMsList })
     : null;
 
