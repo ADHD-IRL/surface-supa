@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,8 +10,9 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { tagColor } from '@/components/agents/AgentCard';
-import { resolveAgent } from '@/lib/agentData';
-import { Plus, X, Upload, ArrowRight, Link2, GitBranch, ChevronRight, Sparkles, Clock, Save, Users } from 'lucide-react';
+import { resolveAgent, buildAgentRecommendationPrompt } from '@/lib/agentData';
+import AgentForm from '@/components/agents/AgentForm';
+import { Plus, X, Upload, ArrowRight, Link2, GitBranch, ChevronRight, Sparkles, Clock, Save, Users, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MODE_OPTIONS = [
@@ -93,6 +94,7 @@ function ModeCard({ option, active, onClick }) {
 export default function NewSession() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const template = location.state?.template || null;
 
   const [form, setForm] = useState(() => {
@@ -139,6 +141,11 @@ export default function NewSession() {
   const [uploading, setUploading] = useState(false);
   const [openDomains, setOpenDomains] = useState({});
   const [teamFilter, setTeamFilter] = useState('all');
+
+  // Agent recommendations
+  const [recommendations, setRecommendations] = useState(null);
+  const [loadingRecs, setLoadingRecs] = useState(false);
+  const [creatingAgent, setCreatingAgent] = useState(null);
 
   // Draft autosave
   const [lastSaved, setLastSaved] = useState(null);
@@ -215,6 +222,32 @@ export default function NewSession() {
 
   const toggleDomainOpen = (key) =>
     setOpenDomains(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const handleRecommendAgents = async () => {
+    setLoadingRecs(true);
+    setRecommendations(null);
+    try {
+      const { prompt, response_json_schema } = buildAgentRecommendationPrompt(form.scenario, agents);
+      const result = await base44.integrations.Core.InvokeLLM({ prompt, response_json_schema });
+      setRecommendations(result.recommendations || []);
+    } finally {
+      setLoadingRecs(false);
+    }
+  };
+
+  const handleAddRecommended = (agentId) => {
+    setForm(f => ({ ...f, selected_agents: [...new Set([...f.selected_agents, agentId])] }));
+    setRosterMode('handpick');
+  };
+
+  const handleCreateAndAdd = async (formData) => {
+    // AgentForm already sets system_prompt via encodeAgentData; just ensure status is active
+    const payload = { ...formData, status: 'active' };
+    const newAgent = await base44.entities.Agent.create(payload);
+    queryClient.invalidateQueries({ queryKey: ['agents'] });
+    handleAddRecommended(newAgent.id);
+    setCreatingAgent(null);
+  };
 
   const effectiveDomains = (() => {
     if (fetchedDomains?.length > 0) return fetchedDomains;
@@ -619,7 +652,88 @@ export default function NewSession() {
                     None
                   </button>
                 </div>
+                {form.scenario.length >= 50 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRecommendAgents}
+                    disabled={loadingRecs}
+                    className="gap-1.5 text-primary border-primary/30 hover:bg-primary/5 h-7 text-xs"
+                  >
+                    {loadingRecs
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Sparkles className="w-3.5 h-3.5" />}
+                    {loadingRecs ? 'Analysing…' : 'Recommend Agents'}
+                  </Button>
+                )}
               </div>
+
+              {/* Recommendation cards */}
+              {recommendations !== null && (
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-xs font-semibold text-foreground">Recommended for this scenario</span>
+                    <span className="text-xs text-muted-foreground ml-auto">{recommendations.length} suggestion{recommendations.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  {recommendations.length === 0 && (
+                    <p className="px-4 py-3 text-sm text-muted-foreground italic">No specific recommendations — use your full roster.</p>
+                  )}
+                  <div className="divide-y divide-border">
+                    {recommendations.map((rec, i) => {
+                      const matchedAgent = rec.matched_agent_id ? agents.find(a => a.id === rec.matched_agent_id) : null;
+                      const resolved = matchedAgent ? resolveAgent(matchedAgent) : null;
+                      const alreadyAdded = matchedAgent && form.selected_agents.includes(matchedAgent.id);
+                      const isNew = !matchedAgent;
+                      const teamColor = isNew
+                        ? (rec.suggested_agent?.team === 'red' ? 'text-red-team' : 'text-blue-team')
+                        : (resolved?.team === 'red' ? 'text-red-team' : 'text-blue-team');
+                      return (
+                        <div key={i} className="px-4 py-3 flex items-start gap-3">
+                          <span className={cn(
+                            'text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5',
+                            isNew
+                              ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                              : 'bg-green-500/10 text-green-700 border border-green-500/20',
+                          )}>
+                            {isNew ? '✦ New' : '✓ Match'}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-foreground">
+                                {isNew ? (rec.suggested_agent?.name || rec.suggested_agent?.discipline) : resolved?.name}
+                              </span>
+                              <span className={cn('text-xs font-medium', teamColor)}>
+                                {isNew ? (rec.suggested_agent?.team === 'red' ? 'Red' : 'Blue') : (resolved?.team === 'red' ? 'Red' : 'Blue')} Team
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {isNew ? rec.suggested_agent?.discipline : resolved?.discipline}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{rec.rationale}</p>
+                          </div>
+                          {isNew ? (
+                            <Button type="button" size="sm" variant="outline"
+                              className="flex-shrink-0 text-xs h-7 border-amber-500/30 text-amber-600 hover:bg-amber-500/5"
+                              onClick={() => setCreatingAgent(rec.suggested_agent)}>
+                              Create &amp; Add
+                            </Button>
+                          ) : alreadyAdded ? (
+                            <span className="text-xs text-muted-foreground flex-shrink-0 mt-1">Added ✓</span>
+                          ) : (
+                            <Button type="button" size="sm" variant="outline"
+                              className="flex-shrink-0 text-xs h-7"
+                              onClick={() => handleAddRecommended(matchedAgent.id)}>
+                              + Add
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="border rounded-md overflow-hidden divide-y divide-border">
                 {agentsByDomain.map(([domainKey, domainAgents]) => {
@@ -844,6 +958,16 @@ export default function NewSession() {
           </div>
         </div>
       </div>
+
+      {/* Create-agent overlay */}
+      {creatingAgent && (
+        <AgentForm
+          agent={creatingAgent}
+          onSave={handleCreateAndAdd}
+          onCancel={() => setCreatingAgent(null)}
+          domains={effectiveDomains}
+        />
+      )}
     </div>
   );
 }

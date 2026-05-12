@@ -260,6 +260,56 @@ function parseCompoundChains(text) {
   return chains;
 }
 
+export function buildAgentRecommendationPrompt(scenario, existingAgents) {
+  const agentList = existingAgents.map(a => {
+    const r = resolveAgent(a);
+    return `ID:${a.id} | ${r.name} | ${r.team === 'red' ? 'Red' : 'Blue'} Team | ${r.discipline || ''} | Focus: ${(r.focus || r.persona_description || '').slice(0, 120)}`;
+  }).join('\n');
+
+  return {
+    prompt: `You are an adversarial risk analysis coordinator. Given a scenario and an existing roster of expert agents, recommend the optimal 5–8 agents to debate this scenario. Balance Red Team (offensive threat identification) with Blue Team (defensive exposure) perspectives. Cover the distinct risk dimensions the scenario touches.
+
+SCENARIO:
+${scenario.slice(0, 1500)}
+
+AVAILABLE AGENTS:
+${agentList || '(none yet)'}
+
+For each recommendation: if an existing agent is a strong or partial fit, reference their ID. If no suitable agent exists, propose a new one with a full profile.`,
+    response_json_schema: {
+      type: 'object',
+      properties: {
+        recommendations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              rationale:        { type: 'string', description: '1-2 sentences: why this perspective is critical for this scenario' },
+              matched_agent_id: { type: 'string', description: 'ID of the best existing agent match, or empty string if none' },
+              match_confidence: { type: 'string', description: 'HIGH, MEDIUM, or LOW — how well the matched agent fits' },
+              suggested_agent: {
+                type: 'object',
+                description: 'Only populated when matched_agent_id is empty — full profile for a new agent',
+                properties: {
+                  name:                { type: 'string' },
+                  team:                { type: 'string', description: 'red or blue' },
+                  discipline:          { type: 'string' },
+                  persona_description: { type: 'string' },
+                  cognitive_bias:      { type: 'string' },
+                  focus:               { type: 'string' },
+                  expertise_level:     { type: 'string', description: 'Junior, Mid-Level, Senior, Principal, or World-Class' },
+                  reasoning_style:     { type: 'string', description: 'Analytical, Intuitive, Contrarian, Systematic, or Probabilistic' },
+                  severity_default:    { type: 'string', description: 'CRITICAL, HIGH, MEDIUM, or LOW' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 export function buildChainBreakPrompt(chains, scenarioContext) {
   const chainsText = chains.map((c, i) =>
     `Chain ${i + 1}: ${c.name}\n${(c.steps || []).map(s => `  Step ${s.step_number}: ${s.step_text}`).join('\n')}`
