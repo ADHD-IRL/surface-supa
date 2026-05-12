@@ -330,6 +330,7 @@ export default function SessionDetail() {
         executive_summary: `v2url:${file_url}`,
         attack_chains: attackChains,
         scrs_score: scrs,
+        v2_synthesis: { scrs_score: scrs, scrs_breakdown: breakdown },
       });
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });

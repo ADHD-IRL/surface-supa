@@ -11,6 +11,8 @@ import { ArrowRight, Search, Loader2, Trash2, MoreHorizontal } from 'lucide-reac
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 
+function getScrs(s) { return s.scrs_score ?? s.v2_synthesis?.scrs_score ?? null; }
+
 function scrsColor(score) {
   if (score == null) return null;
   return score >= 80 ? '#dc2626' : score >= 60 ? '#ea580c' : score >= 40 ? '#ca8a04' : '#16a34a';
@@ -42,8 +44,9 @@ function scrsBand(score) {
 function SessionRow({ session, onDeleteClick, sessionMap, inset = false }) {
   const navigate = useNavigate();
   const cfg = STATUS_BADGE[session.status] || STATUS_BADGE.draft;
-  const color = scrsColor(session.scrs_score);
-  const band = scrsBand(session.scrs_score);
+  const sessionScrs = getScrs(session);
+  const color = scrsColor(sessionScrs);
+  const band = scrsBand(sessionScrs);
   const modeLabel = session.mode
     ? session.mode.charAt(0).toUpperCase() + session.mode.slice(1)
     : null;
@@ -51,10 +54,11 @@ function SessionRow({ session, onDeleteClick, sessionMap, inset = false }) {
 
   // Delta vs parent
   let delta = null;
-  if (session.parent_session_id && session.scrs_score != null) {
+  if (session.parent_session_id && sessionScrs != null) {
     const parent = sessionMap[session.parent_session_id];
-    if (parent?.scrs_score != null) {
-      const d = session.scrs_score - parent.scrs_score;
+    const parentScrs = getScrs(parent);
+    if (parentScrs != null) {
+      const d = sessionScrs - parentScrs;
       delta = d > 0 ? `+${d}` : String(d);
     }
   }
@@ -99,11 +103,11 @@ function SessionRow({ session, onDeleteClick, sessionMap, inset = false }) {
       </div>
 
       {/* SCRS score + delta + band pill */}
-      {session.scrs_score != null && (
+      {sessionScrs != null && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <div className="text-right">
             <div className="text-[9px] uppercase tracking-wider text-muted-foreground">SCRS</div>
-            <div className="text-base font-bold tabular-nums" style={{ color }}>{session.scrs_score}</div>
+            <div className="text-base font-bold tabular-nums" style={{ color }}>{sessionScrs}</div>
           </div>
           {band && color && (
             <span

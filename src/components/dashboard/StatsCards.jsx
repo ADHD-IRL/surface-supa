@@ -9,48 +9,52 @@ function getBandColor(score) {
   return score >= 80 ? '#dc2626' : score >= 60 ? '#ea580c' : score >= 40 ? '#ca8a04' : '#16a34a';
 }
 
+// scrs_score lives at top-level if schema deployed, otherwise falls back to v2_synthesis
+function scrs(s) { return s.scrs_score ?? s.v2_synthesis?.scrs_score ?? null; }
+
 export default function StatsCards({ sessions, agents = [] }) {
   const now = Date.now();
   const ms30 = 30 * 86400000;
 
   const last30 = sessions.filter(s =>
-    s.status === 'completed' && s.scrs_score != null &&
+    s.status === 'completed' && scrs(s) != null &&
     now - new Date(s.created_date).getTime() < ms30
   );
   const prev30 = sessions.filter(s =>
-    s.status === 'completed' && s.scrs_score != null &&
+    s.status === 'completed' && scrs(s) != null &&
     now - new Date(s.created_date).getTime() >= ms30 &&
     now - new Date(s.created_date).getTime() < ms30 * 2
   );
 
   const avgScrs = last30.length
-    ? Math.round(last30.reduce((s, x) => s + x.scrs_score, 0) / last30.length)
+    ? Math.round(last30.reduce((sum, x) => sum + scrs(x), 0) / last30.length)
     : null;
   const avgPrev = prev30.length
-    ? Math.round(prev30.reduce((s, x) => s + x.scrs_score, 0) / prev30.length)
+    ? Math.round(prev30.reduce((sum, x) => sum + scrs(x), 0) / prev30.length)
     : null;
   const scrsDelta = avgScrs != null && avgPrev != null ? avgScrs - avgPrev : null;
 
   // Sessions-by-band counts (last 30d)
   const bandCounts = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
-  last30.forEach(s => { bandCounts[getBand(s.scrs_score)]++; });
+  last30.forEach(s => { bandCounts[getBand(scrs(s))]++; });
   const bandTotal = last30.length;
 
   // Trend data for area chart
   const completedWithScore = sessions
-    .filter(s => s.status === 'completed' && s.scrs_score != null)
-    .sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
+    .filter(s => s.status === 'completed' && scrs(s) != null)
+    .sort((a, b) => new Date(a.created_date) - new Date(b.created_date))
+    .map(s => ({ ...s, _scrs: scrs(s) }));
   const hasTrend = completedWithScore.length >= 2;
 
   // Build SVG path for area chart
   const buildAreaPath = (points, w, h) => {
     if (points.length < 2) return { line: '', area: '' };
-    const max = Math.max(...points.map(p => p.scrs_score));
-    const min = Math.min(...points.map(p => p.scrs_score));
+    const max = Math.max(...points.map(p => p._scrs));
+    const min = Math.min(...points.map(p => p._scrs));
     const span = max - min || 1;
     const dx = w / (points.length - 1);
     const cy = (v) => (h - ((v - min) / span) * (h - 8) - 4).toFixed(1);
-    const coords = points.map((p, i) => ({ x: (i * dx).toFixed(1), y: cy(p.scrs_score) }));
+    const coords = points.map((p, i) => ({ x: (i * dx).toFixed(1), y: cy(p._scrs) }));
     const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c.x},${c.y}`).join(' ');
     const area = `${line} L${coords[coords.length - 1].x},${h} L${coords[0].x},${h} Z`;
     return { line, area, coords };
@@ -62,7 +66,7 @@ export default function StatsCards({ sessions, agents = [] }) {
     : { line: '', area: '', coords: [] };
 
   // Current avg of last30 vs all completed
-  const allCompleted = sessions.filter(s => s.status === 'completed' && s.scrs_score != null);
+  const allCompleted = sessions.filter(s => s.status === 'completed' && scrs(s) != null);
   const running = sessions.filter(s => s.status === 'running');
 
   // Donut data
@@ -73,7 +77,7 @@ export default function StatsCards({ sessions, agents = [] }) {
     { key: 'LOW',      color: '#86efac', label: 'Low' },
   ];
   const donutCounts = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
-  allCompleted.forEach(s => { donutCounts[getBand(s.scrs_score)]++; });
+  allCompleted.forEach(s => { donutCounts[getBand(scrs(s))]++; });
   const donutTotal = allCompleted.length;
 
   // Build donut segments
@@ -224,7 +228,7 @@ export default function StatsCards({ sessions, agents = [] }) {
               <path d={trendLine} fill="none" stroke="#f97316" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
               {/* Critical threshold line at y=80 (we need to map it) */}
               {(() => {
-                const scores = trendPoints.map(p => p.scrs_score);
+                const scores = trendPoints.map(p => p._scrs);
                 const max = Math.max(...scores);
                 const min = Math.min(...scores);
                 const span = max - min || 1;

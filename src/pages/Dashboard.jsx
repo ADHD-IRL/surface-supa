@@ -16,7 +16,7 @@ export default function Dashboard() {
   const { data: sessions = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['sessions'],
     queryFn: async () => {
-      const data = await base44.entities.Session.filter({});
+      const data = await base44.entities.Session.list();
       return [...data].sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
     },
     refetchInterval: (query) => {
