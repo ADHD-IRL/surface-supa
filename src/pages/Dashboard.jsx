@@ -15,11 +15,13 @@ export default function Dashboard() {
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['sessions'],
-    queryFn: () => base44.entities.Session.list('-created_date', 50),
+    queryFn: () => base44.entities.Session.list(),
     refetchInterval: (query) => {
       const data = query.state?.data;
       return data?.some(s => s.status === 'running') ? 5000 : false;
     },
+    refetchOnMount: true,
+    staleTime: 0,
   });
 
   const { data: agents = [] } = useQuery({

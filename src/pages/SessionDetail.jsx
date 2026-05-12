@@ -333,6 +333,7 @@ export default function SessionDetail() {
       });
 
       queryClient.invalidateQueries({ queryKey: ['session', id] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setPhaseTimings(p => ({ ...p, synthesis: fmtDur(Date.now() - r2Start) }));
       setRunningStep('');
       setRunningAgents(null);
@@ -342,6 +343,7 @@ export default function SessionDetail() {
       console.error('[V2 debate] session failed:', err);
       await base44.entities.Session.update(id, { status: 'failed' });
       queryClient.invalidateQueries({ queryKey: ['session', id] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setRunningStep('');
       setRunningAgents(null);
       setDebateStartTime(null);

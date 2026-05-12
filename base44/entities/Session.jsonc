@@ -246,6 +246,19 @@
     "parent_session_title": {
       "type": "string",
       "description": "Title of the parent session (denormalised for display)"
+    },
+    "scrs_score": {
+      "type": "number",
+      "description": "Systemic Critical Risk Score (0–100) computed after synthesis"
+    },
+    "scrs_breakdown": {
+      "type": "object",
+      "description": "Breakdown components for the SCRS score",
+      "properties": {
+        "baseScore":               { "type": "number" },
+        "resilienceModifier":      { "type": "number" },
+        "countermeasureModifier":  { "type": "number" }
+      }
     }
   },
   "required": [
