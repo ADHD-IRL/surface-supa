@@ -1999,7 +1999,7 @@ export default function SessionDetail() {
                           </span>
                         </div>
                         <div className="space-y-1.5">
-                          {sessionSynthesis.compound_chains.slice(0, 2).map((chain, i) => (
+                          {sessionSynthesis.compound_chains.map((chain, i) => (
                             <div key={i} className="flex items-center gap-1 text-[11px] flex-wrap">
                               {(chain.steps || []).slice(0, 3).map((step, j) => (
                                 <React.Fragment key={j}>
