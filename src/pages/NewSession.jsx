@@ -146,6 +146,8 @@ export default function NewSession() {
   const [recommendations, setRecommendations] = useState(null);
   const [loadingRecs, setLoadingRecs] = useState(false);
   const [creatingAgent, setCreatingAgent] = useState(null);
+  const [creatingAgentRecIdx, setCreatingAgentRecIdx] = useState(null);
+  const [createdRecIndices, setCreatedRecIndices] = useState(new Set());
 
   // Draft autosave
   const [lastSaved, setLastSaved] = useState(null);
@@ -226,6 +228,7 @@ export default function NewSession() {
   const handleRecommendAgents = async () => {
     setLoadingRecs(true);
     setRecommendations(null);
+    setCreatedRecIndices(new Set());
     try {
       const { prompt, response_json_schema } = buildAgentRecommendationPrompt(form.scenario, agents);
       const result = await base44.integrations.Core.InvokeLLM({ prompt, response_json_schema });
@@ -241,11 +244,14 @@ export default function NewSession() {
   };
 
   const handleCreateAndAdd = async (formData) => {
-    // AgentForm already sets system_prompt via encodeAgentData; just ensure status is active
     const payload = { ...formData, status: 'active' };
     const newAgent = await base44.entities.Agent.create(payload);
     queryClient.invalidateQueries({ queryKey: ['agents'] });
     handleAddRecommended(newAgent.id);
+    if (creatingAgentRecIdx !== null) {
+      setCreatedRecIndices(prev => new Set([...prev, creatingAgentRecIdx]));
+      setCreatingAgentRecIdx(null);
+    }
     setCreatingAgent(null);
   };
 
@@ -682,13 +688,21 @@ export default function NewSession() {
                   )}
                   <div className="divide-y divide-border">
                     {recommendations.map((rec, i) => {
+                      // A "match" is only valid if the LLM's ID resolves to an actual agent in our roster
                       const matchedAgent = rec.matched_agent_id ? agents.find(a => a.id === rec.matched_agent_id) : null;
                       const resolved = matchedAgent ? resolveAgent(matchedAgent) : null;
-                      const alreadyAdded = matchedAgent && form.selected_agents.includes(matchedAgent.id);
                       const isNew = !matchedAgent;
-                      const teamColor = isNew
-                        ? (rec.suggested_agent?.team === 'red' ? 'text-red-team' : 'text-blue-team')
-                        : (resolved?.team === 'red' ? 'text-red-team' : 'text-blue-team');
+                      const suggestion = rec.suggested_agent || {};
+                      // Derive display fields — fall back across match/new paths gracefully
+                      const displayName       = isNew ? (suggestion.name || suggestion.discipline || 'New Expert') : resolved.name;
+                      const displayDiscipline = isNew ? suggestion.discipline : resolved.discipline;
+                      const displayTeam       = isNew ? suggestion.team : resolved.team;
+                      const teamColor         = displayTeam === 'red' ? 'text-red-team' : 'text-blue-team';
+                      const teamLabel         = (displayTeam === 'red' ? 'Red' : 'Blue') + ' Team';
+                      const alreadyAdded      = !isNew && form.selected_agents.includes(matchedAgent.id);
+                      const recCreated        = createdRecIndices.has(i);
+                      // Only show "Create & Add" when the suggestion has enough data to create from
+                      const canCreate         = isNew && (suggestion.name || suggestion.discipline);
                       return (
                         <div key={i} className="px-4 py-3 flex items-start gap-3">
                           <span className={cn(
@@ -701,26 +715,24 @@ export default function NewSession() {
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-semibold text-foreground">
-                                {isNew ? (rec.suggested_agent?.name || rec.suggested_agent?.discipline) : resolved?.name}
-                              </span>
-                              <span className={cn('text-xs font-medium', teamColor)}>
-                                {isNew ? (rec.suggested_agent?.team === 'red' ? 'Red' : 'Blue') : (resolved?.team === 'red' ? 'Red' : 'Blue')} Team
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                {isNew ? rec.suggested_agent?.discipline : resolved?.discipline}
-                              </span>
+                              <span className="text-sm font-semibold text-foreground">{displayName}</span>
+                              <span className={cn('text-xs font-medium', teamColor)}>{teamLabel}</span>
+                              {displayDiscipline && displayDiscipline !== displayName && (
+                                <span className="text-xs text-muted-foreground">{displayDiscipline}</span>
+                              )}
                             </div>
                             <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{rec.rationale}</p>
                           </div>
-                          {isNew ? (
-                            <Button type="button" size="sm" variant="outline"
-                              className="flex-shrink-0 text-xs h-7 border-amber-500/30 text-amber-600 hover:bg-amber-500/5"
-                              onClick={() => setCreatingAgent(rec.suggested_agent)}>
-                              Create &amp; Add
-                            </Button>
-                          ) : alreadyAdded ? (
+                          {recCreated || alreadyAdded ? (
                             <span className="text-xs text-muted-foreground flex-shrink-0 mt-1">Added ✓</span>
+                          ) : isNew ? (
+                            canCreate && (
+                              <Button type="button" size="sm" variant="outline"
+                                className="flex-shrink-0 text-xs h-7 border-amber-500/30 text-amber-600 hover:bg-amber-500/5"
+                                onClick={() => { setCreatingAgentRecIdx(i); setCreatingAgent(suggestion); }}>
+                                Create &amp; Add
+                              </Button>
+                            )
                           ) : (
                             <Button type="button" size="sm" variant="outline"
                               className="flex-shrink-0 text-xs h-7"
