@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Plus } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import StatsCards from '@/components/dashboard/StatsCards';
 import SessionsList from '@/components/dashboard/SessionsList';
 
@@ -13,14 +13,17 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [groupByLineage, setGroupByLineage] = useState(true);
 
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['sessions'],
-    queryFn: () => base44.entities.Session.list(),
+    queryFn: async () => {
+      const data = await base44.entities.Session.filter({});
+      return [...data].sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
+    },
     refetchInterval: (query) => {
       const data = query.state?.data;
-      return data?.some(s => s.status === 'running') ? 5000 : false;
+      return data?.some(s => s.status === 'running') ? 5000 : 30000;
     },
-    refetchOnMount: true,
+    refetchOnMount: 'always',
     staleTime: 0,
   });
 
@@ -49,11 +52,23 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">Adversarial risk analysis overview</p>
         </div>
-        <Link to="/sessions/new">
-          <Button className="gap-1.5">
-            <Plus className="w-4 h-4" /> New Session
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="w-8 h-8 text-muted-foreground hover:text-foreground"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
           </Button>
-        </Link>
+          <Link to="/sessions/new">
+            <Button className="gap-1.5">
+              <Plus className="w-4 h-4" /> New Session
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <StatsCards sessions={sessions} agents={agents} />
